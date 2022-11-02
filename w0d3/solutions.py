@@ -1,12 +1,13 @@
+# %%
 from w0d2.solutions import *
 from einops import rearrange
 import torch as t
 from torch import nn
-from torchvision import datasets, transforms
+from torchvision import datasets, transforms, models
 from torch.utils.data import DataLoader
 from tqdm.notebook import tqdm_notebook
 import PIL
-
+# %%
 class ConvNet(nn.Module):
     def __init__(self):
         super().__init__()
@@ -223,6 +224,12 @@ class ResNet34(nn.Module):
         x = self.out_layers(x)
         return x
 
+# %%
+
+my_resnet = ResNet34()
+resnet = models.resnet34()
+
+# %%
 
 # ImageNet transforms:
 transform = transforms.Compose([
