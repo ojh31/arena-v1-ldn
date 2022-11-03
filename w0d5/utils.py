@@ -63,13 +63,13 @@ def test_log_back(log_back):
     actual = log_back(grad_out, b, a)
     expected = [2.0, 2.0 / np.e, 2.0 / (np.e**np.e)]
     np.testing.assert_allclose(actual, expected)
-    print("All tests in `test_einsum_inner` passed!")
+    print("All tests in `test_log_back` passed!")
 
 def test_unbroadcast(unbroadcast):
     small = np.ones((2, 1, 3))
     large = np.broadcast_to(small, (5, 1, 2, 4, 3))
     out = unbroadcast(large, small)
-    assert out.shape == small.shape
+    assert out.shape == small.shape, f'out.shape={out.shape}, small.shape={small.shape}, broadcasted.shape={large.shape}, original.shape={small.shape}'
     assert (out == 20.0).all(), "Each element in the small array appeared 20 times in the large array."
 
     small = np.ones((2, 1, 3))
@@ -125,6 +125,8 @@ def test_forward_and_back(forward_and_back):
     expected_dg_da = np.array([1, 1 / 2, 1 / 3])
     expected_dg_db = np.array([1 / 2, 1 / 3, 1])
     expected_dg_dc = np.array([0.13028834])
+    print(a, b, c)
+    print(expected_dg_da, expected_dg_db, expected_dg_dc)
     np.testing.assert_allclose(dg_da, expected_dg_da)
     np.testing.assert_allclose(dg_db, expected_dg_db)
     np.testing.assert_allclose(dg_dc, expected_dg_dc)
@@ -221,6 +223,8 @@ def test_sum(wrap_forward_fn, Tensor):
     global sum
     sum = wrap_forward_fn(_sum)
     a = Tensor(np.array([[0.0, 1.0], [2.0, 3.0]]), requires_grad=True)
+    print(a)
+    print(a.sum(0))
     assert a.sum(0).shape == (2,)
     assert a.sum(0, True).shape == (1, 2)
     print("All tests in `test_sum` passed!")
