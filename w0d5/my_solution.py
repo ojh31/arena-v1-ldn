@@ -414,6 +414,12 @@ class Node:
         self.temporary_mark = False
         self.permanent_mark = False
 
+    @staticmethod
+    def from_tensor(t: Tensor):
+        if t.recipe is not None and len(t.recipe.parents) > 0:
+            return Node(*[Node(child) for child in t.recipe.parents.values()])
+        return Node()
+
 def get_children(node: Node) -> list[Node]:
     return node.children
 
@@ -423,6 +429,7 @@ def topological_sort(node: Node, get_children_fn: Callable) -> list[Any]:
 
     Should raise an error if the graph with `node` as root is not in fact acyclic.
     '''
+    assert isinstance(node, Node)
     if node.temporary_mark:
         raise Exception("Seems like your graph is cyclic")
     if node.permanent_mark:
@@ -430,16 +437,11 @@ def topological_sort(node: Node, get_children_fn: Callable) -> list[Any]:
     node.temporary_mark = True
     nested_descendants = [topological_sort(node, get_children_fn) for node in get_children_fn(node)]
     descendants = [descendant for nest in nested_descendants for descendant in nest]
-    print(nested_descendants)
-    print(descendants)
     node.temporary_mark = False
     node.permanent_mark = True
     descendants.append(node)
     return descendants
 
-
-def get_children(node: Node) -> list[Node]:
-    return node.children
 
 def test_topological_sort_linked_list(topological_sort):
     z = Node()
@@ -488,4 +490,24 @@ test_topological_sort_linked_list(topological_sort)
 test_topological_sort_branching(topological_sort)
 test_topological_sort_rejoining(topological_sort)
 test_topological_sort_cyclic(topological_sort)
+# %%
+def sorted_computational_graph(node: Tensor) -> list[Tensor]:
+    '''
+    For a given tensor, return a list of Tensors that make up the nodes of the given Tensor's computational graph, in reverse topological order.
+    '''
+    node_node = Node.from_tensor(node)
+
+    return topological_sort(node_node, get_children)
+
+a = Tensor([1], requires_grad=True)
+b = Tensor([2], requires_grad=True)
+c = Tensor([3], requires_grad=True)
+d = a * b
+e = c.log()
+f = d * e
+g = f.log()
+name_lookup = {a: "a", b: "b", c: "c", d: "d", e: "e", f: "f", g: "g"}
+
+print([name_lookup[t] for t in sorted_computational_graph(g)])
+# Should get something in reverse alphabetical order (or close)
 # %%
