@@ -411,36 +411,33 @@ else:
 class Node:
     def __init__(self, *children):
         self.children = list(children)
-        self.temporary_mark = False
-        self.permanent_mark = False
-
-    @staticmethod
-    def from_tensor(t: Tensor):
-        if t.recipe is not None and len(t.recipe.parents) > 0:
-            return Node(*[Node(child) for child in t.recipe.parents.values()])
-        return Node()
 
 def get_children(node: Node) -> list[Node]:
     return node.children
 
-def topological_sort(node: Node, get_children_fn: Callable) -> list[Any]:
-    '''
-    Return a list of node's descendants in reverse topological order from future to past.
+def topological_sort(node: Union[Node, Tensor], get_children_fn: Callable) -> list[Any]: 
+    temporary_marks = set()
+    permanent_marks = set()
 
-    Should raise an error if the graph with `node` as root is not in fact acyclic.
-    '''
-    assert isinstance(node, Node)
-    if node.temporary_mark:
-        raise Exception("Seems like your graph is cyclic")
-    if node.permanent_mark:
-        return []
-    node.temporary_mark = True
-    nested_descendants = [topological_sort(node, get_children_fn) for node in get_children_fn(node)]
-    descendants = [descendant for nest in nested_descendants for descendant in nest]
-    node.temporary_mark = False
-    node.permanent_mark = True
-    descendants.append(node)
-    return descendants
+    def topological_sort_recursion(node: Union[Node, Tensor], get_children_fn: Callable) -> list[Any]:
+        '''
+        Return a list of node's descendants in reverse topological order from future to past.
+
+        Should raise an error if the graph with `node` as root is not in fact acyclic.
+        '''
+        if node in temporary_marks:
+            raise Exception("Seems like your graph is cyclic")
+        if node in permanent_marks:
+            return []
+        temporary_marks.add(node)
+        nested_descendants = [topological_sort_recursion(node, get_children_fn) for node in get_children_fn(node)]
+        descendants = [descendant for nest in nested_descendants for descendant in nest]
+        temporary_marks.remove(node)
+        permanent_marks.add(node)
+        descendants.append(node)
+        return descendants
+
+    return topological_sort_recursion(node, get_children_fn)
 
 
 def test_topological_sort_linked_list(topological_sort):
@@ -469,7 +466,7 @@ def test_topological_sort_rejoining(topological_sort):
     w = Node(z, x)
     name_lookup = {w: "w", x: "x", y: "y", z: "z"}
     out = "".join([name_lookup[n] for n in topological_sort(w, get_children)])
-    assert out == "zyxw"
+    assert out == "zyxw", f'out={out}, expected zyxw'
     print("All tests in `test_topological_sort_rejoining` passed!")
 
 def test_topological_sort_cyclic(topological_sort):
@@ -491,13 +488,17 @@ test_topological_sort_branching(topological_sort)
 test_topological_sort_rejoining(topological_sort)
 test_topological_sort_cyclic(topological_sort)
 # %%
+def get_parents(node: Tensor):
+    if not isinstance(node, Tensor) or node.recipe is None:
+        return []
+    return list(node.recipe.parents.values())
+
 def sorted_computational_graph(node: Tensor) -> list[Tensor]:
     '''
     For a given tensor, return a list of Tensors that make up the nodes of the given Tensor's computational graph, in reverse topological order.
     '''
-    node_node = Node.from_tensor(node)
 
-    return topological_sort(node_node, get_children)
+    return topological_sort(node, get_parents)
 
 a = Tensor([1], requires_grad=True)
 b = Tensor([2], requires_grad=True)
@@ -511,3 +512,56 @@ name_lookup = {a: "a", b: "b", c: "c", d: "d", e: "e", f: "f", g: "g"}
 print([name_lookup[t] for t in sorted_computational_graph(g)])
 # Should get something in reverse alphabetical order (or close)
 # %%
+def backprop(end_node: Tensor, end_grad: Optional[Tensor] = None) -> None:
+    '''Accumulates gradients in the grad field of each leaf node.
+
+    tensor.backward() is equivalent to backprop(tensor).
+
+    end_node: 
+        The rightmost node in the computation graph. 
+        If it contains more than one element, end_grad must be provided.
+    end_grad: 
+        A tensor of the same shape as end_node. 
+        Set to 1 if not specified and end_node has only one element.
+    '''
+
+    # Get value of end_grad_arr
+    end_grad_arr = np.ones_like(end_node.array) if end_grad is None else end_grad.array
+
+    # Create dict to store gradients
+    grads: dict[Tensor, Arr] = {end_node: end_grad_arr}
+
+    # Iterate through the computational graph, using your sorting function
+    for node in sorted_computational_graph(end_node):
+
+        # Get the outgradient (recall we need it in our backward functions)
+        outgrad = grads.pop(node)
+        # We only store the gradients if this node is a leaf (see the is_leaf property of Tensor)
+        if node.is_leaf:
+            # Add the gradient to this node's grad (need to deal with special case grad=None)
+            if node.grad is None:
+                node.grad = Tensor(outgrad)
+            else:
+                node.grad.array += outgrad
+
+        # If node has no recipe, then it has no parents, i.e. the backtracking through computational
+        # graph ends here
+        if node.recipe is None:
+            continue
+
+        # If node has a recipe, then we iterate through parents (which is a dict of {arg_posn: tensor})
+        for argnum, parent in node.recipe.parents.items():
+
+            # Get the backward function corresponding to the function that created this node,
+            # and the arg posn of this particular parent within that function 
+            back_fn = BACK_FUNCS.get_back_func(node.recipe.func, argnum)
+
+            # Use this backward function to calculate the gradient
+            in_grad = back_fn(outgrad, node.array, *node.recipe.args, **node.recipe.kwargs)
+
+            # Add the gradient to this node in the dictionary `grads`
+            # Note that we only change the grad of the node itself in the code block above
+            if grads.get(parent) is None:
+                grads[parent] = in_grad
+            else:
+                grads[parent] += in_grad
