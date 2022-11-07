@@ -10,27 +10,20 @@ import plotly.express as px
 import torch as t
 import re
 import numpy as np
-import transformers
 from torch import nn, optim
-import random
 import pandas as pd
-import torch.nn.functional as F
 from dataclasses import dataclass
-from einops import rearrange, reduce, repeat
+from einops import rearrange, repeat
 from fancy_einsum import einsum
-from typing import Optional, Callable, Any, List, Dict, Union
+from typing import Optional, Union
 from tqdm.notebook import tqdm_notebook
 from IPython.display import display
-import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
 
 device = t.device("cuda" if t.cuda.is_available() else "cpu")
 assert str(device) == "cuda"
 
 # %%
-
-
-
 # ============================= TRANSFORMER ARCHITECTURE =============================
 
 @dataclass(frozen=True)
@@ -46,7 +39,6 @@ class TransformerConfig:
     layer_norm_epsilon: float = 1e-05
     print_param_count: bool = True
 
-# %%
 
 class PositionalEncoding(nn.Module):
 
@@ -70,7 +62,6 @@ class PositionalEncoding(nn.Module):
         # This is equivalent to just using an nn.Embedding, but having the input be t.arange(seq_len)
         return x + self.pe[:seq_len, :] # type: ignore
 
-# %%
 
 def multihead_masked_attention(Q, K, V, num_heads):
 
@@ -103,7 +94,6 @@ def multihead_masked_attention(Q, K, V, num_heads):
     return rearrange(attention_values, "batch seqQ nheads headsize -> batch seqQ (nheads headsize)")
 
 
-# %%
 
 class MultiheadMaskedAttention(nn.Module):
     W_QKV: nn.Linear
@@ -141,8 +131,6 @@ class MultiheadMaskedAttention(nn.Module):
         return output
 
 
-# %%
-
 class MLP(nn.Module):
     
     def __init__(self, config):
@@ -155,7 +143,6 @@ class MLP(nn.Module):
     def forward(self, x: t.Tensor) -> t.Tensor:
         return self.dropout(self.fc2(self.gelu(self.fc1(x))))
 
-# %%
 
 class DecoderBlock(nn.Module):
     
@@ -205,52 +192,11 @@ class DecoderOnlyTransformer(nn.Module):
         x = self.ln(x)
         x = einsum("batch seq hidden, vocab hidden -> batch seq vocab", x, self.token_embedding.weight)
         return x
-# %%
 
-
-
-# ============================= REVERSED SEQUENCES =============================
-
-class ReverseDataset(Dataset):
-    def __init__(self, seq_len):
-        self.seq_len = seq_len
-        self.vocab_size = 10 # digits from 0 to 9 inclusive
-        self.size = 10 ** seq_len # so that each seq appears once in the dataset (in expectation)
-
-    def __len__(self):
-        # This is what is returned when you call len(dataset)
-        # And it's what PyTorch uses to construct the dataset when initialised
-        return self.size
-
-    def __getitem__(self, idx):
-        # Rather than randomising, could also generate every single sequence
-        seq = t.randint(self.vocab_size, size=(self.seq_len,), dtype=t.long)
-        seq_reversed = seq.flip(-1)
-        return seq, seq_reversed
-
-# Create dataset for training
-seq_len = 6
-trainset = ReverseDataset(seq_len=seq_len)
 
 # %%
-batch_size = 1024
-trainloader = DataLoader(trainset, shuffle=True, batch_size=batch_size)
+# ============================= TRAINING LOOP =============================
 
-# %%
-config = TransformerConfig(
-    num_layers = 2,
-    num_heads = 6,
-    vocab_size = trainset.vocab_size,
-    hidden_size = 96,
-    max_seq_len = trainset.seq_len,
-)
-
-model = DecoderOnlyTransformer(config).to(device).train()
-loss_fn = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=1e-3)
-epochs = 2
-
-# %%
 
 def train(model, optimizer, loss_fn, trainloader, epochs, dataset_name=None, plot_loss=True):
 
@@ -296,25 +242,6 @@ def train(model, optimizer, loss_fn, trainloader, epochs, dataset_name=None, plo
         fig.show()
     
     return model
-# %%
-
-model = train(model, optimizer, loss_fn, trainloader, epochs, "ReversedDigits")
-# With this model and parameters, I found loss dropping to about 1.17 after second epoch
-
-# %%
-
-model.eval()
-seq = t.randint(10, size=(6,), dtype=t.long, device=device)
-seq_reversed = seq.flip(-1)
-logits = model(seq)
-prediction = logits.argmax(dim=-1).squeeze()
-print("prediction:", prediction)
-print("answer:", seq_reversed)
-t.testing.assert_close(seq_reversed[-3:], prediction[-3:])
-# As expected, model is getting the first three digits wrong, but the last three incorrect (so attention masking is working)
-
-# %%
-
 
 
 
@@ -410,7 +337,7 @@ model = train(model, optimizer, loss_fn, trainloader, epochs, "WordsDataset")
 # %%
 
 # import the sampling methods
-from solutions import *
+from solutions_sampling import *
 
 def apply_sampling_methods(
     input_ids: t.Tensor, logits: t.Tensor, temperature=1.0, freq_penalty=0.0, top_k=0, top_p=0.0
