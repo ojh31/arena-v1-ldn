@@ -181,3 +181,45 @@ class Dropout(nn.Module):
 utils.test_dropout_eval(Dropout)
 utils.test_dropout_training(Dropout)
 # %%
+from scipy.stats import norm
+
+
+class GELU(nn.Module):
+
+    def forward(self, x: t.Tensor) -> t.Tensor:
+        return x * norm.cdf(x)
+
+
+class GELU2(nn.Module):
+
+    def forward(self, x: t.Tensor) -> t.Tensor:
+        tanh_arg = np.sqrt(2 / np.pi) * (x + .044715 * t.pow(x, 3))
+        return 0.5 * x * (1 + t.tanh(tanh_arg))
+
+
+class GELU3(nn.Module):
+
+    def forward(self, x: t.Tensor) -> t.Tensor:
+        return x * (1 / (1+ t.exp(-1.702 * x)))
+
+class Swish(nn.Module):
+
+    def __init__(self, beta):
+        super().__init__()
+        self.beta = beta
+
+    def forward(self, x: t.Tensor) -> t.Tensor:
+        return x / (1 + t.exp(-self.beta * x))
+
+
+utils.plot_gelu(GELU)
+# utils.plot_gelu(GELU2)
+#
+# %%
+x = t.linspace(-5, 5, steps=100)
+fig, ax = plt.subplots()
+sns.lineplot(x=x, y=GELU()(x), label='exact', color='tab:blue')
+sns.lineplot(x=x, y=GELU2()(x), label='approx', color='tab:orange')
+sns.lineplot(x=x, y=GELU3()(x), label='approx2', color='tab:green')
+sns.lineplot(x=x, y=Swish(1)(x), label='swish1', color='tab:red')
+# %%
