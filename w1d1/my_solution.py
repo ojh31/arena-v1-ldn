@@ -109,6 +109,28 @@ for p1, p2 in itertools.product(range(32), repeat=2):
 sns.heatmap(dots, cmap='coolwarm_r')
 
 #%%
+from einops import rearrange, repeat, reduce
+class PositionalEncoding(nn.Module):
+
+    def __init__(self, max_seq_len: int, embedding_dim: int):
+        super().__init__()
+        self.max_seq_len = max_seq_len # same as base above
+        self.embedding_dim = embedding_dim # same as D above
+
+    def forward(self, x: t.Tensor) -> t.Tensor:
+        """
+        x: shape (batch, seq_len, embedding_dim)
+        """
+        batch, seq_len, embedding_dim = x.shape
+        embedding_idx = repeat(t.arange(embedding_dim), 'e -> b s e', s=seq_len, b=batch)
+        pos_idx = repeat(t.arange(seq_len), 's -> b s e', e=embedding_idx, b=batch)
+        return t.where(
+            embedding_idx % 2 == 0,
+            t.sin(pos_idx / t.pow(seq_len, embedding_idx / embedding_dim)),
+            t.cos(pos_idx / t.pow(seq_len, (embedding_idx - 1) / embedding_dim))
+        )
+
+#%%
 # NLP Example
 batch, sentence_length, embedding_dim = 20, 5, 10
 embedding = torch.randn(batch, sentence_length, embedding_dim)* 2 + 1
