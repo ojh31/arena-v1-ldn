@@ -6,7 +6,6 @@ from torch.utils.data import DataLoader
 import transformer_replication
 from typing import Optional,Union
 import re
-import requests
 import torch.nn as nn
 from fancy_einsum import einsum
 from typing import Union, Optional
@@ -32,9 +31,6 @@ class WordsDataset(Dataset):
         sample = (text, label)
         return sample
 
-#shakespeare_text = requests.get("https://www.gutenberg.org/files/100/100-0.txt").content.decode('utf-8')
-# %%
-#print(shakespeare_text[:1000])
 # %%
 with open('100-0.txt', encoding='utf-8') as f:
     shakespeare_text = f.read()
@@ -93,46 +89,48 @@ shakespeare = Data(shakespeare_text)
 
 #%%
 
-config = None
-
 def train() -> transformer_replication.DecoderOnlyTransformer:
-    #wandb_config_dict = {
-    #    'batch_size': 256,
-    #    'hidden_size': 64,
-    #    'lr': 0.003
-    #}
+    wandb_config_dict = {
+       'batch_size': 64,
+       'hidden_size': 64,
+       'lr': 0.001,
+       'epochs': 5,
+       'max_seq_len': 20,
+       'dropout': 0.1,
+    }
 
-    # wandb.init()
+    wandb.init(project='w1d3_shakespeare', config=wandb_config_dict)
 
-    config = transformer_replication.TransformerConfig(
+    transformer_config = transformer_replication.TransformerConfig(
         num_layers=6, #N=6
         num_heads=8, #h=8
         vocab_size=len(shakespeare.vocab),
-        hidden_size=512, #wandb.config.hidden_size, #d_model = 64 x 8 = 512
-        max_seq_len=20, #wandb.config.max_seq_len,
-        dropout=0.1 #p=0.1
+        hidden_size=wandb.config.hidden_size, #d_model = 64 x 8 = 512
+        max_seq_len=wandb.config.max_seq_len,
+        dropout=wandb.config.dropout #p=0.1
     )
 
-    epochs = 2
-    batch_size = 64 # wandb.config.batch_size
-    lr = .001 # wandb.config.lr
+    epochs = wandb.config.epochs
+    batch_size = wandb.config.batch_size
+    lr = wandb.config.lr
 
-    model = transformer_replication.DecoderOnlyTransformer(config).to(device).train()
+    model = transformer_replication.DecoderOnlyTransformer(transformer_config).to(device).train()
     optimizer = t.optim.Adam(model.parameters(), lr=lr)
     loss_fn = nn.CrossEntropyLoss()
 
     examples_seen = 0
+    start_time = time.time()
 
     traintext = shakespeare.get_excerpt("From fairest", "140")
     testtext = shakespeare.get_excerpt("140", "THE END")
 
-    trainset = shakespeare.generate_autoregressive_dataset(config.max_seq_len, traintext)
-    testset = shakespeare.generate_autoregressive_dataset(config.max_seq_len, testtext)
+    trainset = shakespeare.generate_autoregressive_dataset(transformer_config.max_seq_len, traintext)
+    testset = shakespeare.generate_autoregressive_dataset(transformer_config.max_seq_len, testtext)
 
     trainloader = DataLoader(trainset, shuffle=True, batch_size=batch_size)
     testloader = DataLoader(testset, shuffle=True, batch_size=batch_size)
 
-    # wandb.watch(model, criterion=loss_fn, log="all", log_freq=10, log_graph=True)
+    wandb.watch(model, criterion=loss_fn, log="all", log_freq=10, log_graph=True)
 
     for epoch in range(epochs):
         progress_bar = tqdm_notebook(trainloader)
@@ -147,7 +145,7 @@ def train() -> transformer_replication.DecoderOnlyTransformer:
             optimizer.step()
             progress_bar.set_description(f"Epoch = {epoch}, Loss = {loss.item():.4f}")
             examples_seen += len(x)
-            # wandb.log({"train_loss": loss, "elapsed": time.time() - start_time}, step=examples_seen)
+            wandb.log({"train_loss": loss, "elapsed": time.time() - start_time}, step=examples_seen)
 
         with t.inference_mode():
             accuracy = 0
@@ -162,14 +160,14 @@ def train() -> transformer_replication.DecoderOnlyTransformer:
                 accuracy += (y_predictions == y_flat).sum().item()
                 total += y_flat.size(0)
 
-            # wandb.log({"test_accuracy": accuracy/total}, step=examples_seen)
+            wandb.log({"test_accuracy": accuracy/total}, step=examples_seen)
 
         print(f"Epoch {epoch+1}/{epochs}, train loss is {loss:.6f}, accuracy is {accuracy}/{total}")
 
-    # filename = f"{wandb.run.dir}/model_state_dict.pt"
-    # print(f"Saving model to: {filename}")
-    # t.save(model.state_dict(), filename)
-    # wandb.save(filename)
+    filename = f"{wandb.run.dir}/model_state_dict.pt"
+    print(f"Saving model to: {filename}")
+    t.save(model.state_dict(), filename)
+    wandb.save(filename)
     return model
 
 sweep_config = {
@@ -201,3 +199,6 @@ importlib.reload(sampling)
 text_output = sampling.sample_tokens(model, shakespeare, " I sang a wonderful song ", max_tokens_generated=100, temperature=1.0, top_k=10)
 print(text_output)
 # %%
+# TODO: 
+# why do we need to surround with spaces?
+# sweep with wandb
