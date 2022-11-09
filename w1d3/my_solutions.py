@@ -146,3 +146,103 @@ assert penalized_logits[5156].item() == -11, "Expected 6 occurrences of ' baby' 
 assert penalized_logits[14801].item() == -5, "Expected 3 occurrences of ' Baby' with leading space"
 print("Tests passed!")
 # %%
+N_RUNS = 1
+your_prompt = "Jingle bells, jingle bells, jingle all the way"
+cases = [
+    ("High freq penalty", dict(freq_penalty=100.0)),
+    ("Negative freq penalty", dict(freq_penalty=-1.0)),
+    ("Too hot!", dict(temperature=2.0)),
+    ("Pleasantly cool", dict(temperature=0.7)),
+    ("Pleasantly warm", dict(temperature=0.9)),
+    ("Too cold!", dict(temperature=0.01)),
+]
+for (name, kwargs) in cases:
+    for i in range(N_RUNS):
+        output = sample_tokens(gpt, tokenizer, your_prompt, max_tokens_generated=24, **kwargs)
+        print(f"Sample {i} with: {name} ({kwargs}):")
+        print(f"Your model said: {repr(output)}\n")
+# %%
+import numpy as np
+def sample_top_k(logits: t.Tensor, top_k: int) -> int:
+    '''
+    logits: shape (vocab_size, ) - unnormalized log-probabilities
+    top_k: only consider this many of the most likely tokens for sampling
+
+    Return: a sampled token
+    '''
+    topk_obj = logits.topk(top_k)
+    masked_logits = t.full_like(logits, -np.inf)
+    masked_logits[topk_obj.indices] = logits[topk_obj.indices]
+    return sample_basic(masked_logits)
+
+k = 3
+probs = t.linspace(0, 0.4, 5)
+unnormalized_logits = probs.log() + 1.2345
+samples = t.tensor([sample_top_k(unnormalized_logits, k) for _ in range(N)])
+counts = t.bincount(samples, minlength=len(probs)) / N
+expected = probs.clone()
+expected[:-k] = 0
+expected /= expected.sum()
+print("Checking empirical frequencies (try to increase N if this test fails): ", counts)
+t.testing.assert_close(counts, expected, atol=0.01, rtol=0)
+print("Tests passed!")
+# %%
+your_prompt = "In a shocking finding, scientist discovered a herd of unicorns living in a remote, previously unexplored valley, in the Andes Mountains. Even more surprising to the researchers was the fact that the unicorns spoke perfect English."
+output = sample_tokens(gpt, tokenizer, your_prompt, temperature=0.7, top_k=40, max_tokens_generated=64)
+print(f"Your model said: {repr(output)}")
+# %%
+def sample_top_p(logits: t.Tensor, top_p: float, min_tokens_to_keep: int = 1) -> int:
+    '''
+    logits: shape (vocab_size, ) - unnormalized log-probabilities
+
+    Return: a sampled token
+    '''
+    sorted_idx = logits.argsort(descending=True)
+    sorted_logits = logits[sorted_idx]
+    sorted_probs = t.exp(sorted_logits)
+    sorted_probs /= sorted_probs.sum()
+    sorted_cumsums = sorted_probs.cumsum(dim=0)
+    first_idx = t.where(sorted_cumsums >= top_p)[0][0].item()
+    tokens_to_keep = max(first_idx + 1, min_tokens_to_keep)
+    keep_idx = list(range(tokens_to_keep))
+    keep_reindexed = sorted_idx[keep_idx]
+    masked_logits = t.full_like(logits, -t.inf)
+    masked_logits[keep_reindexed] = logits[keep_reindexed]
+    # print(logits, top_p, min_tokens_to_keep)
+    # print(sorted_idx, sorted_logits)
+    # print(sorted_probs, sorted_cumsums)
+    # print(first_idx, tokens_to_keep, keep_idx, keep_reindexed)
+    # print(masked_logits)
+    return sample_basic(masked_logits)
+
+#%%
+N = 2000
+unnormalized_logits = t.tensor([0.2, 0.3, 0.5]).log() + 2.3456
+samples = t.tensor([sample_top_p(unnormalized_logits, 0.5) for _ in range(N)])
+counts = t.bincount(samples, minlength=len(unnormalized_logits)) / N
+print("top_p of 0.5 or lower should only return token 2: ", counts)
+assert counts[0] == 0 and counts[1] == 0
+
+#%%
+N = 2000
+unnormalized_logits = t.tensor([0.2, 0.3, 0.5]).log() + 2.3456
+samples = t.tensor([sample_top_p(unnormalized_logits, 0.50001) for _ in range(N)])
+counts = t.bincount(samples, minlength=len(unnormalized_logits)) / N
+print("top_p in (0.5, 0.8] should return tokens 1 and 2: ", counts)
+assert counts[0] == 0
+
+#%%
+N = 40_000
+top_p = 0.71
+probs = t.linspace(0, 0.4, 5)
+unnormalized_logits = probs.log() + 1.2345
+samples = t.tensor([sample_top_p(unnormalized_logits, top_p) for _ in range(N)])
+counts = t.bincount(samples, minlength=len(probs)) / N
+expected = probs.clone()
+expected[0:2] = 0
+expected /= expected.sum()
+print("Checking empirical frequencies (try to increase N if this test fails): ", counts)
+t.testing.assert_close(counts, expected, atol=0.01, rtol=0.0)
+
+print("All tests passed!")
+# %%
