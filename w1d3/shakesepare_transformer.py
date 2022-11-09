@@ -43,10 +43,7 @@ def tokenize(text):
     return re.split(r"\b", text)
 
 def remove_spaces(text):
-    if "  " in text:
-        text = text.replace("  ", " ")
-        return remove_spaces(text)
-    return text
+    return re.sub('\s+', ' ', text)
 
 # %%
 class Data():
@@ -92,10 +89,9 @@ class Data():
         return "".join(tokens)
 
 shakespeare = Data(shakespeare_text)
-shakespeare.vocab[:1000]
+
 
 #%%
-import wandb
 
 config = None
 
@@ -200,6 +196,8 @@ model = train()
 # model = transformer_replication.DecoderOnlyTransformer(config)
 # model.load_state_dict(t.load("/Users/m/Documents/arena/wandb/run-20221109_135624-3suubzjf/files/model_state_dict.pt"))
 
-text_output = sampling.sample_tokens(model, shakespeare, "He sang a wonderful song ", max_tokens_generated=100, temperature=1.0, top_k=10)
+import importlib
+importlib.reload(sampling)
+text_output = sampling.sample_tokens(model, shakespeare, " I sang a wonderful song ", max_tokens_generated=100, temperature=1.0, top_k=10)
 print(text_output)
 # %%

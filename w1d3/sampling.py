@@ -168,7 +168,7 @@ def sample_top_k(logits: t.Tensor, top_k: int) -> int:
     Return: a sampled token
     '''
     values, indices = t.topk(logits, top_k)
-    return indices[sample_basic(values)]
+    return indices[sample_basic(values)].item()
 
 if __name__ == "__main__":
     N = 50000
