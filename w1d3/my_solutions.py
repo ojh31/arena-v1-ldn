@@ -255,21 +255,74 @@ from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 import urllib.request
 import re
+from typing import Union, Optional
 #%%
-class WordsDataset(Dataset):
-    def __init__(self, inputs, labels):
-        self.labels = labels
-        self.inputs = inputs
+class WordsTokenizer():
+    model_max_length: int
+
+    def __init__(self, text: str):
+        self.text = text
+        vocab = set()
+        model_max_length = 0
+        for input in self.split(text):
+            vocab.update(set(input))
+            model_max_length = max(model_max_length, len(input))
+        self.model_max_length = model_max_length
+        self.vocab = list(sorted(list(vocab)))
+        self.token_to_str = {i: t for i, t in enumerate(self.vocab)}
+        self.str_to_token = {t: i for i, t in enumerate(self.vocab)}
+        
+    @staticmethod
+    def split(text: str):
+        return re.split(r"\b", text)
 
     @staticmethod
-    def from_html(seq_len, url="https://www.gutenberg.org/files/100/100-0.txt"):
+    def join(l: list[str]):
+        return r"\b".join(l)
+
+    def encode(self, initial_text: str = None, return_tensors: Optional[str] = None) -> Union[list, t.Tensor]:
+        '''
+        Tokenizes initial_text, then returns the token ids.
+
+        Return type is list by default, but if return_tensors="pt" then it is returned as a tensor.
+        '''
+        if initial_text is None:
+            initial_text = self.text
+        text_split = self.split(initial_text)
+        token_list = [self.str_to_token[t] for t in text_split]
+        if return_tensors == 'pt':
+            return t.tensor(token_list)
+        else:
+            return token_list
+
+    def decode(self, list_of_ids: Union[t.Tensor, list]) -> str:
+        '''
+        Converts ids to a list of tokens, then joins them into a single string.
+        '''
+        list_of_ids = [t.item() for t in list_of_ids]
+        text_list = [self.token_to_str[t] for t in list_of_ids]
+        text_join = self.join(text_list)
+        return text_join
+
+#%%
+class WordsDataset(Dataset):
+    def __init__(self, text):
+        self.text = text
+        self.tokenizer = WordsTokenizer(text)
+        tokens = self.tokenizer.encode()
+        self.inputs = [tokens[i: i + seq_len] for i in range(len(tokens) - seq_len)]
+        self.labels = [tokens[i + 1: i + 1 + seq_len] for i in range(len(tokens) - seq_len)]
+
+    @staticmethod
+    def from_html(seq_len, first, last, url="https://www.gutenberg.org/files/100/100-0.txt"):
         with urllib.request.urlopen(url) as f:
             full_text = f.read()
-        sonnets = full_text.split('THE SONNETS')[-1].split('ALL’S WELL THAT ENDS WELL')[0]
-        tokens = re.split(r"\b", sonnets.decode('utf-8'))
-        inputs = tokens[::seq_len]
-        labels = tokens[1::seq_len]
-        return inputs, labels
+        sonnets = full_text.decode('utf-8').split('THE SONNETS')[-1].split(
+            'ALL’S WELL THAT ENDS WELL'
+        )[0]
+        subset = sonnets.split(str(first), maxsplit=1)[1]
+        subset = subset.split(str(last), maxsplit=1)[0]
+        return WordsDataset(subset)
 
     def __len__(self):
         return len(self.labels)
@@ -281,30 +334,274 @@ class WordsDataset(Dataset):
         return sample
 
 #%%
-seq_len = 6
+seq_len = 20
 batch_size = 16
-trainset = WordsDataset.from_html(seq_len)
-testset = WordsDataset.from_html(seq_len)
+trainset = WordsDataset.from_html(seq_len, first=1, last=120)
+testset = WordsDataset.from_html(seq_len, first=121, last=154)
 
 trainloader = DataLoader(trainset, shuffle=True, batch_size=batch_size)
 testloader = DataLoader(testset, shuffle=True, batch_size=batch_size)
+
+
+#### From yesterday
 #%%
-class WordsTokenizer():
-    model_max_length: int
+from einops import rearrange, repeat
+import torch.nn as nn
+from tqdm import tqdm_notebook
+from fancy_einsum import einsum
 
-    def __init__(self, wordsdataset: WordsDataset):
-        pass
 
-    def encode(self, initial_text: str, return_tensors: Optional[str] = None) -> Union[list, t.Tensor]:
-        '''
-        Tokenizes initial_text, then returns the token ids.
+class Embedding(nn.Module):
 
-        Return type is list by default, but if return_tensors="pt" then it is returned as a tensor.
-        '''
-        pass
+    def __init__(self, num_embeddings: int, embedding_dim: int):
+        super().__init__()
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
 
-    def decode(self, list_of_ids: Union[t.Tensor, list]) -> str:
+        self.weight = nn.Parameter(t.randn((self.num_embeddings, self.embedding_dim)))
+
+    def forward(self, x: t.LongTensor) -> t.Tensor:
+        '''For each integer in the input, return that row of the embedding.
         '''
-        Converts ids to a list of tokens, then joins them into a single string.
+        #return einsum('num_embeddings embedding_dim, i num_embeddings -> i embedding_dim', self.weight, nn.functional.one_hot(x, num_classes=self.num_embeddings).float())
+        return self.weight[x]
+
+    def extra_repr(self) -> str:
+        return f"{self.num_embeddings}, {self.embedding_dim}"
+
+
+class PositionalEncoding(nn.Module):
+
+    def __init__(self, max_seq_len: int, embedding_dim: int):
+        super().__init__()
+        # Defining our positional encoding array, with `max_seq_len` rows
+        # This is an advantage of using sinusoidal encoding: we can easily expand to sequences of greater length without adding more learned params
+        angles = t.outer(t.arange(max_seq_len), 1 / 10000 ** (2 * t.arange(embedding_dim//2) / embedding_dim))
+        pe = t.zeros((max_seq_len, embedding_dim))
+        pe[:, ::2] = t.sin(angles)
+        pe[:, 1::2] = t.cos(angles)
+        # Register array as a buffer, rather than parameter (we don't want it to be updated by gradient descent)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x: t.Tensor) -> t.Tensor:
+        """
+        x: shape (batch, seq_len, embedding_dim)
+        """
+        batch, seq_len, embedding_dim = x.shape
+        # We slice the positional encoding, so it's the same shape as x
+        # This is equivalent to just using an nn.Embedding, but having the input be t.arange(seq_len)
+        return x + self.pe[:seq_len, :] # type: ignore
+
+
+def multihead_masked_attention(Q: t.Tensor, K: t.Tensor, V: t.Tensor, num_heads: int):
+    '''
+    Implements multihead masked attention on the matrices Q, K and V.
+
+    Q: shape (batch, seq, nheads*headsize)
+    K: shape (batch, seq, nheads*headsize)
+    V: shape (batch, seq, nheads*headsize)
+
+    returns: shape (batch, seq, nheads*headsize)
+    '''
+    new_Q = rearrange(Q, 'batch seq (nheads headsize) -> batch nheads seq headsize', nheads=num_heads)
+    new_K = rearrange(K, 'batch seq (nheads headsize) -> batch nheads seq headsize', nheads=num_heads)
+    new_V = rearrange(V, 'batch seq (nheads headsize) -> batch nheads seq headsize', nheads=num_heads)
+
+    attention_scores = einsum('batches nheads seq_Q head_size, batches nheads seq_K head_size -> batches nheads seq_Q seq_K', new_Q, new_K)
+    batches, _, seq_Q, head_size = new_Q.shape
+    batches, _, seq_K, head_size = new_K.shape
+    q_index = repeat(t.arange(0, seq_Q), 'seq_Q -> batches nheads seq_Q seq_K', batches=batches, seq_K=seq_K, nheads=num_heads)
+    k_index = repeat(t.arange(0, seq_K), 'seq_K -> batches nheads seq_Q seq_K', batches=batches, seq_Q=seq_Q, nheads=num_heads)
+    mask = k_index <= q_index
+    device_inf = t.tensor(-np.inf).to(Q.device)
+    device_mask = mask.to(Q.device)
+    masked_attention_scores = t.where(device_mask, attention_scores, device_inf)
+    attention_probabilities = nn.functional.softmax(masked_attention_scores / np.sqrt(head_size), dim=-1)
+    attention_values = einsum('batches nheads seq_Q seq_K, batches nheads seq_K head_size -> batches seq_Q nheads head_size', attention_probabilities, new_V)
+    return rearrange(attention_values, 'batches seq_Q nheads head_size -> batches seq_Q (nheads head_size)')
+
+
+class MultiheadMaskedAttention(nn.Module):
+    W_QKV: nn.Linear
+    W_O: nn.Linear
+
+    def __init__(self, hidden_size: int, num_heads: int):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.num_heads = num_heads
+        assert self.hidden_size % self.num_heads == 0
+        self.W_QKV = nn.Linear(hidden_size, 3 * hidden_size)
+        self.W_O = nn.Linear(hidden_size, hidden_size)
+
+    def forward(self, x: t.Tensor) -> t.Tensor:
         '''
-        pass
+        x: shape (batch, seq, hidden_size)
+
+        Return: shape (batch, seq, hidden_size)
+        '''
+        QKV = self.W_QKV(x)
+        Q = QKV[..., :self.hidden_size]
+        K = QKV[..., self.hidden_size:-self.hidden_size]
+        V = QKV[..., -self.hidden_size:]
+        attention_values = multihead_masked_attention(Q, K, V, self.num_heads)
+        return self.W_O(attention_values)
+#%%
+#### Putting together the transformer
+# %%
+from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class TransformerConfig:
+    '''Constants used throughout your decoder-only transformer model.'''
+
+    num_layers: int
+    num_heads: int
+    vocab_size: int
+    hidden_size: int
+    max_seq_len: int
+    dropout: float = 0.1
+    layer_norm_epsilon: float = 1e-05
+
+
+
+# %%
+class BertMLP(nn.Module):
+    def __init__(self, config: TransformerConfig):
+        super().__init__()
+        self.linear1 = nn.Linear(config.hidden_size, 4 * config.hidden_size)
+        self.gelu = nn.GELU()
+        self.linear2 = nn.Linear(4 * config.hidden_size, config.hidden_size)
+        self.dropout = nn.Dropout(config.dropout)
+
+    def forward(self, x: t.Tensor) -> t.Tensor:
+        x = self.linear1(x)
+        x = self.gelu(x)
+        x = self.linear2(x)
+        x = self.dropout(x)
+        return x
+
+class DecoderBlock(nn.Module):
+
+    def __init__(self, config: TransformerConfig):
+        super().__init__()
+        self.attention = MultiheadMaskedAttention(config.hidden_size, config.num_heads)
+        self.layer_norm1 = nn.LayerNorm(config.hidden_size, config.layer_norm_epsilon)
+        self.mlp = BertMLP(config)
+        self.layer_norm2 = nn.LayerNorm(config.hidden_size, config.layer_norm_epsilon)
+
+    def forward(self, x: t.Tensor) -> t.Tensor:
+        y = self.attention(x)
+        y = self.layer_norm1(y)
+        x = x + y
+        z = self.mlp(x)
+        z = self.layer_norm2(z)
+        x = x + z
+        return x
+
+class DecoderOnlyTransformer(nn.Module):
+
+    def __init__(self, config: TransformerConfig):
+        super().__init__()
+        self.token_embedding = Embedding(config.vocab_size, config.hidden_size)
+        self.positional_embedding = PositionalEncoding(config.max_seq_len, config.hidden_size)
+        self.dropout = nn.Dropout(config.dropout)
+        self.bert_blocks = nn.Sequential(*[DecoderBlock(config) for _ in range(config.num_layers)])
+        self.layer_norm = nn.LayerNorm(config.hidden_size, config.layer_norm_epsilon)
+        
+    def forward(self, x: t.Tensor) -> t.Tensor:
+        x = self.token_embedding(x)
+        x = self.positional_embedding(x)
+        x = self.dropout(x)
+        for block in self.bert_blocks:
+            x = block(x)
+        x = self.layer_norm(x)
+        x = einsum('num_embeddings embedding_dim,batch seq_len embedding_dim ->batch seq_len num_embeddings', self.token_embedding.weight, x)
+        return x
+
+
+#### Run
+import wandb
+import os
+import time
+device = t.device('cuda')
+os.environ['WANDB_NOTEBOOK_NAME'] = 'my_solutions.py'
+def train():
+
+    wandb_config_dict = {
+        'batch_size': 256,
+        'hidden_size': 64,
+        'lr': 0.00125
+    }
+    
+    wandb.init(project='w1d1_transformer', config=wandb_config_dict)
+
+    config = TransformerConfig(
+        num_layers=2, #N=6
+        num_heads=4, #h=8
+        vocab_size=10,
+        hidden_size=wandb.config.hidden_size, #d_model = 64 x 8 = 512
+        max_seq_len=6,
+        dropout=0.0 #p=0.1
+    )
+
+    epochs = 1
+    batch_size = wandb.config.batch_size
+    lr = wandb.config.lr
+
+    model = DecoderOnlyTransformer(config).to(device).train()
+    optimizer = t.optim.Adam(model.parameters(), lr=lr)
+    loss_fn = nn.CrossEntropyLoss()
+
+    examples_seen = 0
+    start_time = time.time()
+
+    trainset = WordsDataset.from_html(seq_len=seq_len)
+    testset = WordsDataset.from_html(seq_len=seq_len)
+
+    trainloader = DataLoader(trainset, shuffle=True, batch_size=batch_size)
+    testloader = DataLoader(testset, shuffle=True, batch_size=batch_size)
+
+    wandb.watch(model, criterion=loss_fn, log="all", log_freq=10, log_graph=True)
+
+    for epoch in range(epochs):
+        progress_bar = tqdm_notebook(trainloader)
+
+        for (x, y) in progress_bar:
+            x = x.to(device)
+            y = y.to(device)
+            optimizer.zero_grad()
+            y_hat = model(x)
+            loss = loss_fn(rearrange(y_hat, "batch seq vocab_size -> (batch seq) vocab_size"), rearrange(y, "batch seq -> (batch seq)"))
+            loss.backward()
+            optimizer.step()
+            progress_bar.set_description(f"Epoch = {epoch}, Loss = {loss.item():.4f}")
+            examples_seen += len(x)
+            wandb.log({"train_loss": loss, "elapsed": time.time() - start_time}, step=examples_seen)
+
+        with t.inference_mode():
+            accuracy = 0
+            total = 0
+            for (x, y) in testloader:
+                x = x.to(device)
+                y = y.to(device)
+                y_hat = model(x)
+                y_flat = rearrange(y, "batch seq -> (batch seq)")
+                y_pred_flat = rearrange(y_hat, "batch seq vocab_size -> (batch seq) vocab_size")
+                y_predictions = y_pred_flat.argmax(-1)
+                accuracy += (y_predictions == y_flat).sum().item()
+                total += y_flat.size(0)
+
+            wandb.log({"test_accuracy": accuracy/total}, step=examples_seen)
+
+        print(f"Epoch {epoch+1}/{epochs}, train loss is {loss:.6f}, accuracy is {accuracy}/{total}")
+
+    filename = f"{wandb.run.dir}/model_state_dict.pt"
+    print(f"Saving model to: {filename}")
+    t.save(model.state_dict(), filename)
+    wandb.save(filename)
+    return model
+
+
+#%%
+model = train()
+# %%
