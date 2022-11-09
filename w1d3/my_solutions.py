@@ -198,7 +198,7 @@ def sample_top_p(logits: t.Tensor, top_p: float, min_tokens_to_keep: int = 1) ->
     Return: a sampled token
     '''
     sorted_idx = logits.argsort(descending=True)
-    sorted_logits = logits[sorted_idx]
+    sorted_logits = logits[sorted_idx].double()
     sorted_probs = t.exp(sorted_logits)
     sorted_probs /= sorted_probs.sum()
     sorted_cumsums = sorted_probs.cumsum(dim=0)
@@ -246,3 +246,65 @@ t.testing.assert_close(counts, expected, atol=0.01, rtol=0.0)
 
 print("All tests passed!")
 # %%
+your_prompt = "Eliezer Shlomo Yudkowsky (born September 11, 1979) is an American decision and artificial intelligence (AI) theorist and writer, best known for"
+output = sample_tokens(gpt, tokenizer, your_prompt, temperature=0.7, top_p=0.95, max_tokens_generated=64)
+print(f"Your model said: {repr(output)}")
+# %%
+#### Shakespeare
+from torch.utils.data import Dataset
+from torch.utils.data import DataLoader
+import urllib.request
+import re
+#%%
+class WordsDataset(Dataset):
+    def __init__(self, inputs, labels):
+        self.labels = labels
+        self.inputs = inputs
+
+    @staticmethod
+    def from_html(seq_len, url="https://www.gutenberg.org/files/100/100-0.txt"):
+        with urllib.request.urlopen(url) as f:
+            full_text = f.read()
+        sonnets = full_text.split('THE SONNETS')[-1].split('ALL’S WELL THAT ENDS WELL')[0]
+        tokens = re.split(r"\b", sonnets.decode('utf-8'))
+        inputs = tokens[::seq_len]
+        labels = tokens[1::seq_len]
+        return inputs, labels
+
+    def __len__(self):
+        return len(self.labels)
+
+    def __getitem__(self, idx):
+        label = self.labels[idx]
+        text = self.inputs[idx]
+        sample = (text, label)
+        return sample
+
+#%%
+seq_len = 6
+batch_size = 16
+trainset = WordsDataset.from_html(seq_len)
+testset = WordsDataset.from_html(seq_len)
+
+trainloader = DataLoader(trainset, shuffle=True, batch_size=batch_size)
+testloader = DataLoader(testset, shuffle=True, batch_size=batch_size)
+#%%
+class WordsTokenizer():
+    model_max_length: int
+
+    def __init__(self, wordsdataset: WordsDataset):
+        pass
+
+    def encode(self, initial_text: str, return_tensors: Optional[str] = None) -> Union[list, t.Tensor]:
+        '''
+        Tokenizes initial_text, then returns the token ids.
+
+        Return type is list by default, but if return_tensors="pt" then it is returned as a tensor.
+        '''
+        pass
+
+    def decode(self, list_of_ids: Union[t.Tensor, list]) -> str:
+        '''
+        Converts ids to a list of tokens, then joins them into a single string.
+        '''
+        pass
