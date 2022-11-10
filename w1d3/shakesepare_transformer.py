@@ -15,6 +15,8 @@ import time
 import wandb
 import sampling
 import requests
+import glob
+import yaml
 # %%
 device = t.device('cuda')
 #%%
@@ -48,7 +50,7 @@ def remove_duplicates(text):
     return text
 
 # %%
-class Data():
+class WordData():
     def __init__(self, text, start, end):
         self.complete_text = remove_duplicates(text)
         if start is not None and end is not None:
@@ -61,13 +63,13 @@ class Data():
 
     @staticmethod
     def from_link(link, start=None, end=None):
-        return Data(requests.get(link).content.decode('utf-8'), start, end)
+        return WordData(requests.get(link).content.decode('utf-8'), start, end)
     
     @staticmethod
     def from_file(filename, start=None, end=None):
         with open(filename, encoding='utf-8') as f:
             text = f.read()
-        return Data(text, start, end)
+        return WordData(text, start, end)
 
     def get_excerpt(self, start="THE SONNETS", end="THE END", text=None):
         if text is None:
@@ -106,13 +108,15 @@ class Data():
         tokens = [self.id_to_token[int(i)] for i in list_of_ids]
         return "".join(tokens)
 
-shakespeare = Data.from_file('100-0.txt', start="1\n", end='ALL’S WELL THAT ENDS WELL')
+shakespeare = WordData.from_file('100-0.txt', start="1\n", end='ALL’S WELL THAT ENDS WELL')
 print('Vocab size: ', len(shakespeare.vocab))
 
 #%%
-
 def train() -> transformer_replication.DecoderOnlyTransformer:
-    # wandb_config_dict = {
+ 
+    wandb.init() 
+    # project='w1d3_shakespeare'
+    # config = {
     #    'batch_size': 64,
     #    'hidden_size': 64,
     #    'lr': 0.001,
@@ -121,15 +125,13 @@ def train() -> transformer_replication.DecoderOnlyTransformer:
     #    'dropout': 0.1,
     # }
 
-    wandb.init() # project='w1d3_shakespeare'
-
     transformer_config = transformer_replication.TransformerConfig(
-        num_layers=wandb.config.num_layers, #N=6
-        num_heads=wandb.config.num_heads, #h=8
+        num_layers=wandb.config.num_layers,
+        num_heads=wandb.config.num_heads,
         vocab_size=len(shakespeare.vocab),
-        hidden_size=wandb.config.hidden_size, #d_model = 64 x 8 = 512
+        hidden_size=wandb.config.hidden_size,
         max_seq_len=wandb.config.max_seq_len,
-        dropout=wandb.config.dropout #p=0.1
+        dropout=wandb.config.dropout
     )
 
     epochs = wandb.config.epochs
@@ -202,9 +204,9 @@ sweep_config = {
     {
         'batch_size': {'values': [64]},
         'hidden_size': {'values': [512]},
-        'max_seq_len': {'values': [40, 50, 60]},
+        'max_seq_len': {'values': [60]},
         'lr': {'values': [.001]},
-        'dropout': {'values': [.1]},
+        'dropout': {'values': [0, .1, .2, .3, .4, .5]},
         'epochs': {'values': [2]},
         'num_layers': {'values': [6]},
         'num_heads': {'values': [8]},
@@ -218,9 +220,7 @@ wandb.agent(sweep_id=sweep_id, function=train, count=10)
 #%% [markdown]
 #### Load model
 # %%
-import glob
-import yaml
-run_id = '6kne1waf'
+run_id = 'vczcygry'
 root = '/home/oskar/projects/arena-v1-ldn/w1d3/wandb'
 model_path = glob.glob(
     f'{root}/run-*-{run_id}/files/model_state_dict.pt'
@@ -239,6 +239,7 @@ base_config = transformer_replication.TransformerConfig(
     max_seq_len=yaml_cfg['max_seq_len']['value'],
     dropout=yaml_cfg['dropout']['value'],
 )
+shakespeare.model_max_length = yaml_cfg['max_seq_len']['value']
 model = transformer_replication.DecoderOnlyTransformer(base_config)
 state_dict = t.load(
     model_path
@@ -253,3 +254,4 @@ print(text_output)
 # why do we need to surround with spaces?
 # why is bigger seq_len better?
 # why do some models seem to get stuck in local minima?
+# how can we include freq_penalty when punctuation are tokens?
