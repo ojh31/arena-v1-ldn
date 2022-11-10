@@ -108,27 +108,34 @@ class WordData():
         tokens = [self.id_to_token[int(i)] for i in list_of_ids]
         return "".join(tokens)
 
-shakespeare = WordData.from_file('100-0.txt', start="1\n", end='ALL’S WELL THAT ENDS WELL')
-print('Vocab size: ', len(shakespeare.vocab))
+#%%
+# shakespeare = WordData.from_file('100-0.txt', start="1\n", end='ALL’S WELL THAT ENDS WELL')
+# print('Vocab size: ', len(shakespeare.vocab))
+#%%
+mlk = WordData.from_file('mlk.txt')
+print('Vocab size: ', len(mlk.vocab))
 
 #%%
-def train() -> transformer_replication.DecoderOnlyTransformer:
+def train_mlk():
  
-    wandb.init() 
-    # project='w1d3_shakespeare'
-    # config = {
-    #    'batch_size': 64,
-    #    'hidden_size': 64,
-    #    'lr': 0.001,
-    #    'epochs': 5,
-    #    'max_seq_len': 20,
-    #    'dropout': 0.1,
-    # }
+    wandb.init(
+        project='mlk',
+        config = {
+            'batch_size': 64,
+            'hidden_size': 512,
+            'lr': 0.001,
+            'epochs': 1,
+            'max_seq_len': 30,
+            'dropout': 0.1,
+            'num_layers': 6,
+            'num_heads': 8,
+        }
+    ) 
 
     transformer_config = transformer_replication.TransformerConfig(
         num_layers=wandb.config.num_layers,
         num_heads=wandb.config.num_heads,
-        vocab_size=len(shakespeare.vocab),
+        vocab_size=len(mlk.vocab),
         hidden_size=wandb.config.hidden_size,
         max_seq_len=wandb.config.max_seq_len,
         dropout=wandb.config.dropout
@@ -145,15 +152,21 @@ def train() -> transformer_replication.DecoderOnlyTransformer:
     examples_seen = 0
     start_time = time.time()
 
-    traintext = shakespeare.get_excerpt("From fairest", "140")
-    testtext = shakespeare.get_excerpt("140", "THE END")
+    traintext = mlk.get_excerpt("Mr. Chairman", "James Weldon")
+    testtext = mlk.get_excerpt("Johnson:", "glory of the coming of the Lord!!")
 
-    trainset = shakespeare.generate_autoregressive_dataset(transformer_config.max_seq_len, traintext)
-    testset = shakespeare.generate_autoregressive_dataset(transformer_config.max_seq_len, testtext)
+    # traintext = mlk.get_excerpt("From fairest", "140")
+    # testtext = mlk.get_excerpt("140", "THE END")
+
+    trainset = mlk.generate_autoregressive_dataset(transformer_config.max_seq_len, traintext)
+    testset = mlk.generate_autoregressive_dataset(transformer_config.max_seq_len, testtext)
 
     trainloader = DataLoader(trainset, shuffle=True, batch_size=batch_size)
     testloader = DataLoader(testset, shuffle=True, batch_size=batch_size)
 
+    print(f'# characters: train={len(traintext)}, test={len(testtext)}')
+    print(f'# sequences: train={len(trainset)}, test={len(testset)}')
+    
     wandb.watch(model, criterion=loss_fn, log="all", log_freq=10, log_graph=True)
 
     for epoch in range(epochs):
@@ -196,31 +209,31 @@ def train() -> transformer_replication.DecoderOnlyTransformer:
 #%% [markdown]
 #### Train model
 #%%
-sweep_config = {
-    'method': 'bayes',
-    'name': 'shakespeare_sweep',
-    'metric': {'name': 'train_loss', 'goal': 'minimize'},
-    'parameters': 
-    {
-        'batch_size': {'values': [64]},
-        'hidden_size': {'values': [512]},
-        'max_seq_len': {'values': [60]},
-        'lr': {'values': [.001]},
-        'dropout': {'values': [0, .1, .2, .3, .4, .5]},
-        'epochs': {'values': [2]},
-        'num_layers': {'values': [6]},
-        'num_heads': {'values': [8]},
-     }
-}
-sweep_id = wandb.sweep(sweep=sweep_config, project='w1d3_shakespeare')
-wandb.agent(sweep_id=sweep_id, function=train, count=10)
+# sweep_config = {
+#     'method': 'bayes',
+#     'name': 'mlk_sweep',
+#     'metric': {'name': 'train_loss', 'goal': 'minimize'},
+#     'parameters': 
+#     {
+#         'batch_size': {'values': [64]},
+#         'hidden_size': {'values': [512]},
+#         'max_seq_len': {'values': [60]},
+#         'lr': {'values': [.001]},
+#         'dropout': {'values': [.1]},
+#         'epochs': {'values': [2]},
+#         'num_layers': {'values': [6]},
+#         'num_heads': {'values': [8]},
+#      }
+# }
+# sweep_id = wandb.sweep(sweep=sweep_config, project='w1d3_mlk')
+# wandb.agent(sweep_id=sweep_id, function=train_mlk, count=1)
 #%%
-# model = train()
+train_mlk()
 
 #%% [markdown]
-#### Load model
-# %%
-run_id = 'vczcygry'
+### Load model
+#%%
+run_id = '30cv3o0n'
 root = '/home/oskar/projects/arena-v1-ldn/w1d3/wandb'
 model_path = glob.glob(
     f'{root}/run-*-{run_id}/files/model_state_dict.pt'
@@ -234,12 +247,12 @@ with open(yaml_path, 'r') as f:
 base_config = transformer_replication.TransformerConfig(
     num_layers=yaml_cfg['num_layers']['value'],
     num_heads=yaml_cfg['num_heads']['value'],
-    vocab_size=len(shakespeare.vocab),
+    vocab_size=len(mlk.vocab),
     hidden_size=yaml_cfg['hidden_size']['value'],
     max_seq_len=yaml_cfg['max_seq_len']['value'],
     dropout=yaml_cfg['dropout']['value'],
 )
-shakespeare.model_max_length = yaml_cfg['max_seq_len']['value']
+mlk.model_max_length = yaml_cfg['max_seq_len']['value']
 model = transformer_replication.DecoderOnlyTransformer(base_config)
 state_dict = t.load(
     model_path
@@ -247,7 +260,7 @@ state_dict = t.load(
 model.load_state_dict(state_dict)
 
 #%%
-text_output = sampling.sample_tokens(model, shakespeare, " I sang a beautiful song ", max_tokens_generated=300, temperature=1.0, top_k=10)
+text_output = sampling.sample_tokens(model, mlk, " I pray that one day we might ", max_tokens_generated=300, temperature=1.0, top_k=10)
 print(text_output)
 # %%
 # TODO: 
@@ -255,3 +268,4 @@ print(text_output)
 # why is bigger seq_len better?
 # why do some models seem to get stuck in local minima?
 # how can we include freq_penalty when punctuation are tokens?
+# why is accuracy < 50%?
