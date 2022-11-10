@@ -14,6 +14,7 @@ from tqdm.notebook import tqdm_notebook
 import time
 import wandb
 import sampling
+import requests
 # %%
 device = t.device('cuda')
 #%%
@@ -32,29 +33,50 @@ class WordsDataset(Dataset):
         return sample
 
 # %%
-with open('100-0.txt', encoding='utf-8') as f:
-    shakespeare_text = f.read()
-# %%
 def tokenize(text):
     return re.split(r"\b", text)
 
-def remove_spaces(text):
-    return re.sub('\s+', ' ', text)
+def _remove_duplicates(text, string=" "):
+    if string + string in text:
+        text = text.replace(string + string, string)
+        return _remove_duplicates(text, string)
+    return text
+
+def remove_duplicates(text):
+    text = _remove_duplicates(text, ' ')
+    text = _remove_duplicates(text, '\n')
+    return text
 
 # %%
 class Data():
-    def __init__(self, text):
-        self.complete_text = remove_spaces(text)
+    def __init__(self, text, start, end):
+        self.complete_text = remove_duplicates(text)
+        if start is not None and end is not None:
+            self.complete_text = self.get_excerpt(start, end)
         self.complete_tokens = tokenize(self.complete_text)
         self.vocab = sorted(set(self.complete_tokens))
         self.token_to_id = dict(zip(self.vocab, list(range(len(self.vocab)))))
         self.id_to_token = dict(zip(list(range(len(self.vocab))), self.vocab))
         self.model_max_length = None
 
+    @staticmethod
+    def from_link(link, start=None, end=None):
+        return Data(requests.get(link).content.decode('utf-8'), start, end)
+    
+    @staticmethod
+    def from_file(filename, start=None, end=None):
+        with open(filename, encoding='utf-8') as f:
+            text = f.read()
+        return Data(text, start, end)
+
     def get_excerpt(self, start="THE SONNETS", end="THE END", text=None):
         if text is None:
             text = self.complete_text
-        return text.split(start, maxsplit=1)[1].split(end, maxsplit=1)[0]
+        assert start in text, f'get_excerpt: cannot find {start} in text'
+        l_stripped = text.split(start, maxsplit=1)[1]
+        assert end in l_stripped, f'get_excerpt: cannot find {end} in text'
+        r_stripped = l_stripped.split(end, maxsplit=1)[0]
+        return r_stripped
 
     def generate_autoregressive_dataset(self, sequence_length, text=None):
         self.model_max_length = sequence_length
@@ -84,8 +106,8 @@ class Data():
         tokens = [self.id_to_token[int(i)] for i in list_of_ids]
         return "".join(tokens)
 
-shakespeare = Data(shakespeare_text)
-
+shakespeare = Data.from_file('100-0.txt', start="1\n", end='ALL’S WELL THAT ENDS WELL')
+print('Vocab size: ', len(shakespeare.vocab))
 
 #%%
 
@@ -169,6 +191,8 @@ def train() -> transformer_replication.DecoderOnlyTransformer:
     t.save(model.state_dict(), filename)
     wandb.save(filename)
 
+#%% [markdown]
+#### Train model
 #%%
 sweep_config = {
     'method': 'bayes',
@@ -177,36 +201,52 @@ sweep_config = {
     'parameters': 
     {
         'batch_size': {'values': [64]},
-        'hidden_size': {'values': [64, 128, 256]},
-        'max_seq_len': {'values': [20, 30, 40]},
+        'hidden_size': {'values': [128, 256, 512]},
+        'max_seq_len': {'values': [30, 40, 50]},
         'lr': {'values': [.001]},
         'dropout': {'values': [.1]},
         'epochs': {'values': [2]},
-        'num_layers': {'values': 6},
-        'num_heads': {'values': 8},
+        'num_layers': {'values': [6]},
+        'num_heads': {'values': [8]},
      }
 }
 sweep_id = wandb.sweep(sweep=sweep_config, project='w1d3_shakespeare')
 wandb.agent(sweep_id=sweep_id, function=train, count=10)
 #%%
 # model = train()
-# %%
 
-# print(wandb.run.dir)
+#%% [markdown]
+#### Load model
+# %%
+import glob
+import yaml
+run_id = '6kne1waf'
+root = '/home/oskar/projects/arena-v1-ldn/w1d3/wandb'
+model_path = glob.glob(
+    f'{root}/run-*-{run_id}/files/model_state_dict.pt'
+)[0]
+yaml_path = glob.glob(
+    f'{root}/run-*-{run_id}/files/config.yaml'
+)[0]
+with open(yaml_path, 'r') as f:
+    yaml_cfg = yaml.safe_load(f)
+#%%
 base_config = transformer_replication.TransformerConfig(
-    num_layers=6,
-    num_heads=8,
+    num_layers=yaml_cfg['num_layers']['value'],
+    num_heads=yaml_cfg['num_heads']['value'],
     vocab_size=len(shakespeare.vocab),
-    hidden_size=128,
-    max_seq_len=40,
-    dropout=0.1,
+    hidden_size=yaml_cfg['hidden_size']['value'],
+    max_seq_len=yaml_cfg['max_seq_len']['value'],
+    dropout=yaml_cfg['dropout']['value'],
 )
 model = transformer_replication.DecoderOnlyTransformer(base_config)
-state_dict = t.load("/home/oskar/projects/arena-v1-ldn/w1d3/wandb/dazzling_sweep_7.pt")
+state_dict = t.load(
+    model_path
+)
 model.load_state_dict(state_dict)
 
 #%%
-text_output = sampling.sample_tokens(model, shakespeare, " I sang a wonderful song ", max_tokens_generated=100, temperature=1.0, top_k=10)
+text_output = sampling.sample_tokens(model, shakespeare, " I sang a beautiful song ", max_tokens_generated=300, temperature=1.0, top_k=10)
 print(text_output)
 # %%
 # TODO: 
