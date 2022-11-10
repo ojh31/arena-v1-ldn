@@ -90,20 +90,20 @@ shakespeare = Data(shakespeare_text)
 #%%
 
 def train() -> transformer_replication.DecoderOnlyTransformer:
-    wandb_config_dict = {
-       'batch_size': 64,
-       'hidden_size': 64,
-       'lr': 0.001,
-       'epochs': 5,
-       'max_seq_len': 20,
-       'dropout': 0.1,
-    }
+    # wandb_config_dict = {
+    #    'batch_size': 64,
+    #    'hidden_size': 64,
+    #    'lr': 0.001,
+    #    'epochs': 5,
+    #    'max_seq_len': 20,
+    #    'dropout': 0.1,
+    # }
 
-    wandb.init(project='w1d3_shakespeare', config=wandb_config_dict)
+    wandb.init() # project='w1d3_shakespeare'
 
     transformer_config = transformer_replication.TransformerConfig(
-        num_layers=6, #N=6
-        num_heads=8, #h=8
+        num_layers=wandb.config.num_layers, #N=6
+        num_heads=wandb.config.num_heads, #h=8
         vocab_size=len(shakespeare.vocab),
         hidden_size=wandb.config.hidden_size, #d_model = 64 x 8 = 512
         max_seq_len=wandb.config.max_seq_len,
@@ -168,37 +168,46 @@ def train() -> transformer_replication.DecoderOnlyTransformer:
     print(f"Saving model to: {filename}")
     t.save(model.state_dict(), filename)
     wandb.save(filename)
-    return model
 
+#%%
 sweep_config = {
     'method': 'bayes',
     'name': 'shakespeare_sweep',
-    'metric': {'name': 'test_accuracy', 'goal': 'maximize'},
+    'metric': {'name': 'train_loss', 'goal': 'minimize'},
     'parameters': 
     {
-        'batch_size': {'values': [256]},
-        'hidden_size': {'values': [512]},
-        'max_seq_len': {'values': [50]},
+        'batch_size': {'values': [64]},
+        'hidden_size': {'values': [64, 128, 256]},
+        'max_seq_len': {'values': [20, 30, 40]},
         'lr': {'values': [.001]},
+        'dropout': {'values': [.1]},
+        'epochs': {'values': [2]},
+        'num_layers': {'values': 6},
+        'num_heads': {'values': 8},
      }
 }
-
-# sweep_id = wandb.sweep(sweep=sweep_config, project='shakespeare')
-
-# wandb.agent(sweep_id=sweep_id, function=train, count=1)
+sweep_id = wandb.sweep(sweep=sweep_config, project='w1d3_shakespeare')
+wandb.agent(sweep_id=sweep_id, function=train, count=10)
 #%%
-model = train()
+# model = train()
 # %%
 
 # print(wandb.run.dir)
-# model = transformer_replication.DecoderOnlyTransformer(config)
-# model.load_state_dict(t.load("/Users/m/Documents/arena/wandb/run-20221109_135624-3suubzjf/files/model_state_dict.pt"))
+base_config = transformer_replication.TransformerConfig(
+    num_layers=6,
+    num_heads=8,
+    vocab_size=len(shakespeare.vocab),
+    hidden_size=128,
+    max_seq_len=40,
+    dropout=0.1,
+)
+model = transformer_replication.DecoderOnlyTransformer(base_config)
+state_dict = t.load("/home/oskar/projects/arena-v1-ldn/w1d3/wandb/dazzling_sweep_7.pt")
+model.load_state_dict(state_dict)
 
-import importlib
-importlib.reload(sampling)
+#%%
 text_output = sampling.sample_tokens(model, shakespeare, " I sang a wonderful song ", max_tokens_generated=100, temperature=1.0, top_k=10)
 print(text_output)
 # %%
 # TODO: 
 # why do we need to surround with spaces?
-# sweep with wandb
