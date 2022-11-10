@@ -201,8 +201,8 @@ sweep_config = {
     'parameters': 
     {
         'batch_size': {'values': [64]},
-        'hidden_size': {'values': [128, 256, 512]},
-        'max_seq_len': {'values': [30, 40, 50]},
+        'hidden_size': {'values': [512]},
+        'max_seq_len': {'values': [40, 50, 60]},
         'lr': {'values': [.001]},
         'dropout': {'values': [.1]},
         'epochs': {'values': [2]},
@@ -251,3 +251,5 @@ print(text_output)
 # %%
 # TODO: 
 # why do we need to surround with spaces?
+# why is bigger seq_len better?
+# why do some models seem to get stuck in local minima?
