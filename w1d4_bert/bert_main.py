@@ -3,7 +3,7 @@ import transformers
 import bert_architecture
 import torch.nn as nn
 import torch as t
-from typing import Optional
+from typing import Optional, List
 from einops import rearrange, reduce, repeat
 from fancy_einsum import einsum
 import numpy as np
@@ -89,6 +89,7 @@ def print_param_count_from_dicts(
 
 
 #%%
+importlib.reload(bert_architecture)
 bert_config = bert_architecture.TransformerConfig(
     num_layers=12,
     hidden_size=768,
@@ -98,7 +99,6 @@ bert_config = bert_architecture.TransformerConfig(
     layer_norm_epsilon=1e-12,
     max_seq_len=512,
 )
-importlib.reload(bert_architecture)
 my_bert = bert_architecture.BertLanguageModel(bert_config)
 
 #%%
@@ -141,8 +141,6 @@ def copy_weights_from_bert(
 
     Returns your bert model, with weights loaded in.
     '''
-
-    # FILL IN CODE: define a state dict from my_bert.named_parameters() and bert.named_parameters()
     bert_params = reformat_params(dict(bert.named_parameters()))
     assert set(bert_params.keys()) == set(my_params)
     my_bert.load_state_dict(bert_params)
@@ -150,4 +148,37 @@ def copy_weights_from_bert(
 
 # %%
 loaded_bert = copy_weights_from_bert(my_bert, bert)
+# %%
+def predict(model, tokenizer, text: str, k=15) -> List[List[str]]:
+    '''
+    Return a list of k strings for each [MASK] in the input.
+    '''
+    tokens = tokenizer.encode(text, return_tensors='pt')
+    print(tokens)
+    with t.inference_mode():
+        output = model.eval()(tokens)
+    all_logits = output if isinstance(output, t.Tensor) else output.logits
+    strings_per_mask = []
+    for i, token in enumerate(tokens):
+        if token != tokenizer.mask_token_id:
+            continue
+        logits = all_logits[0, i]
+        topk_tokens = t.topk(logits, k=k).indices
+        topk_words = tokenizer.batch_decode(topk_tokens.reshape(-1, 1))
+        strings_per_mask.append(topk_words)
+    return strings_per_mask
+
+
+def test_bert_prediction(predict, model, tokenizer):
+    '''Your Bert should know some names of American presidents.'''
+    text = "Former President of the United States of America, George[MASK][MASK]"
+    predictions = predict(model, tokenizer, text)
+    print(f"Prompt: {text}")
+    print("Model predicted: \n", "\n".join(map(str, predictions)))
+    assert "Washington" in predictions[0]
+    assert "Bush" in predictions[0]
+
+#%%
+test_bert_prediction(predict, my_bert, tokenizer)
+
 # %%

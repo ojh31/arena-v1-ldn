@@ -25,6 +25,8 @@ def make_additive_attention_mask(
         shape (batch, nheads=1, seqQ=1, seqK)
         Contains 0 if attention is allowed, big_negative_number if not.
     '''
+    assert isinstance(one_zero_attention_mask, t.Tensor)
+    assert isinstance(big_negative_number, float)
     filled = t.where(
         one_zero_attention_mask == 0, 
         big_negative_number,
@@ -196,13 +198,14 @@ class BertCommon(nn.Module):
         used in the attention blocks.
         token_type_ids: (batch, seq) - only used for NSP, passed to token type embedding.
         '''
+        assert isinstance(x, t.Tensor)
         pos = t.arange(x.shape[1], device=x.device)
         additive_attention_mask = make_additive_attention_mask(one_zero_attention_mask)
-        x = self.layer_norm(
-            self.token_embedding(x) + 
-            self.positional_embedding(pos) + 
-            self.segment_embedding(token_type_ids)
-        )
+        embedding_sum =  self.token_embedding(x)
+        embedding_sum += self.positional_embedding(pos)
+        if token_type_ids is not None:
+            embedding_sum += self.segment_embedding(token_type_ids)
+        x = self.layer_norm(embedding_sum)
         x = self.dropout(x)
         for block in self.bert_blocks:
             x = block(x, additive_attention_mask)
@@ -231,6 +234,7 @@ class BertLanguageModel(nn.Module):
         '''
         x: (batch, seq)
         '''
+        assert isinstance(x, t.Tensor), f'Bad input to BertLanguageModel.forward: {type(x)} of length {len(x)}'
         x = self.common(x)
         x = self.linear(x)
         x = self.gelu(x)
