@@ -164,3 +164,78 @@ test_load_pretrained_weights(loaded_gpt, tokenizer)
 # %%
 test_load_pretrained_weights(gpt, tokenizer)
 # %%
+import transformers
+import torch as t
+
+def beam_search(
+    model, input_ids: t.Tensor, num_return_sequences: int, num_beams: int, 
+    max_new_tokens: int, tokenizer, verbose=False
+) -> list[tuple[float, t.Tensor]]:
+    '''
+    input_ids: (seq, ) - the prompt
+    max_new_tokens: 
+        stop after this many new tokens are generated, even if no EOS is generated. In this case, 
+        the best incomplete sequences should also be returned.
+    verbose: 
+        if True, print the current (unfinished) completions after each iteration for debugging purposes
+
+    Return:
+        list of length num_return_sequences. 
+        Each element is a tuple of (logprob, tokens) where the tokens include both prompt and completion, 
+        sorted by descending logprob.
+    '''
+    assert num_return_sequences <= num_beams
+    seq_len = len(input_ids)
+    tbc_seqs = [input_ids]
+    tbc_log_probs = [0]
+    finished_seqs = []
+    finished_log_probs = []
+    new_tokens = 0
+    while len(finished_seqs) < num_return_sequences and new_tokens < max_new_tokens:
+        new_tokens += 1
+        new_tbc_seqs = []
+        new_tbc_probs = []
+        assert len(tbc_seqs) <= num_beams, f'len(tbc_seqs)={len(tbc_seqs)}, num_beams={num_beams}'
+        for cur_seq, cur_log_prob in zip(tbc_seqs, tbc_log_probs):
+            inp = cur_seq[-seq_len:]
+            with t.inference_mode():
+                output = model.eval()(inp)
+            all_logits = output if isinstance(output, t.Tensor) else output.logits
+            logits = all_logits[-1, :]
+            log_probs = nn.functional.log_softmax(logits, dim=0)
+            for token, token_log_prob in enumerate(log_probs.numpy()):
+                new_log_prob = cur_log_prob + token_log_prob
+                new_seq = t.cat((cur_seq, t.tensor([token])), dim=0)
+                if token == getattr(tokenizer, "eos_token_id", None):
+                    finished_seqs.append(new_seq)
+                    finished_log_probs.append(new_log_prob)
+                else:
+                    new_tbc_seqs.append(new_seq)
+                    new_tbc_probs.append(new_log_prob)
+        new_tbc_argsort = np.argsort(new_tbc_probs)[-num_beams:]
+        tbc_seqs = [new_tbc_seqs[i] for i in new_tbc_argsort]
+        tbc_log_probs = [new_tbc_probs[i] for i in new_tbc_argsort]
+        if verbose:
+            print(f'Logging TBC sequences after {new_tokens} new tokens with num_beams={num_beams}')
+            for seq in tbc_seqs:
+                seq_str = tokenizer.decode(seq)
+                print(seq_str)
+    finished_seqs, finished_log_probs = finished_seqs + tbc_seqs, finished_log_probs + tbc_log_probs
+    finished_argsort = np.argsort(finished_log_probs)[::-1]
+    finished_seqs = [finished_seqs[i] for i in finished_argsort]
+    finished_log_probs = [finished_log_probs[i] for i in finished_argsort]
+    return [(logprob, tokens) for logprob, tokens in zip(finished_log_probs, finished_seqs)]
+       
+
+#%%
+your_prompt = "I don't want to rule the universe. I just think"
+input_ids = tokenizer(your_prompt, return_tensors="pt", return_attention_mask=False)["input_ids"][0]
+
+num_return_sequences = 3
+num_beams = 6
+max_new_tokens = 10
+
+final_logitsums_and_completions = beam_search(
+    gpt, input_ids, num_return_sequences, num_beams, max_new_tokens, tokenizer, verbose=True
+)
+# %%
