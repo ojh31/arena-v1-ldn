@@ -134,8 +134,8 @@ class MultiheadMaskedAttention(nn.Module):
         self.num_heads = num_heads
         self.dropout = dropout
         assert self.hidden_size % self.num_heads == 0
-        self.W_QKV = nn.Linear(hidden_size, 3 * hidden_size)
-        self.W_O = nn.Linear(hidden_size, hidden_size)
+        self.W_QKV = nn.Linear(hidden_size, 3 * hidden_size, bias=True)
+        self.W_O = nn.Linear(hidden_size, hidden_size, bias=True)
 
     def forward(self, x: t.Tensor) -> t.Tensor:
         '''
