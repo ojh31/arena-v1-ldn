@@ -5,7 +5,6 @@ import torch.nn as nn
 import torch as t
 from typing import Optional
 from einops import rearrange, reduce, repeat
-import utils
 from fancy_einsum import einsum
 import numpy as np
 import importlib
@@ -34,7 +33,7 @@ def rename_param(p: str):
         .replace('bert.embeddings.token_type_embeddings', 'common.segment_embedding')
         .replace('bert.encoder.layer', 'common.bert_blocks')
         .replace('intermediate.dense', 'mlp.linear1')
-        .replace('output.dense', 'mlp.linear2')
+        .replace('attention.output.dense', 'attention.W_O')
         .replace('bert.embeddings.LayerNorm', 'common.layer_norm')
         .replace('self.query', 'W_Q')
         .replace('self.key', 'W_K')
@@ -44,6 +43,7 @@ def rename_param(p: str):
         .replace('cls.predictions.bias', 'unembed_bias')
         .replace('cls.predictions.transform.LayerNorm', 'layer')
         .replace('cls.predictions.transform.dense', 'linear')
+        .replace('output.dense', 'mlp.linear2')
     )
 
 def print_param_count_from_dicts(
@@ -108,7 +108,7 @@ def reformat_params(params: dict[str, nn.Parameter]):
     new_state_dict = {
         k: v 
         for k, v in params.items()
-        if 'W_Q' not in k and 'W_V' not in k and 'W_O' not in k
+        if 'W_Q' not in k and 'W_V' not in k and 'W_K' not in k
     }
     # print(f'Left {len(new_state_dict)} params unchanged up to renaming')
     concatenated = {
@@ -143,8 +143,11 @@ def copy_weights_from_bert(
     '''
 
     # FILL IN CODE: define a state dict from my_bert.named_parameters() and bert.named_parameters()
-
-    my_bert.load_state_dict(state_dict)
+    bert_params = reformat_params(dict(bert.named_parameters()))
+    assert set(bert_params.keys()) == set(my_params)
+    my_bert.load_state_dict(bert_params)
     return my_bert
 
+# %%
+loaded_bert = copy_weights_from_bert(my_bert, bert)
 # %%
