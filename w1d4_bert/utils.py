@@ -3,7 +3,7 @@ import numpy as np
 import torch as t
 from IPython.display import display
 
-def print_param_count(*models, display_df=True, use_state_dict=False):
+def print_param_count(*models, display_df=True, use_state_dict=False, name_mapper = lambda x: x):
     """
     display_df: bool
         If true, displays styled dataframe
@@ -21,10 +21,10 @@ def print_param_count(*models, display_df=True, use_state_dict=False):
         print(f"Model {i}, total params = {sum([param.numel() for name, param in model.named_parameters()])}")
         iterator = model.state_dict().items() if use_state_dict else model.named_parameters()
         df = pd.DataFrame([
-            {f"name_{i}": name, f"shape_{i}": tuple(param.shape), f"num_params_{i}": param.numel()}
+            {f"name_{i}": name_mapper(name), f"shape_{i}": tuple(param.shape), f"num_params_{i}": param.numel()}
             for name, param in iterator
         ]) if (i == 1) else pd.DataFrame([
-            {f"num_params_{i}": param.numel(), f"shape_{i}": tuple(param.shape), f"name_{i}": name}
+            {f"num_params_{i}": param.numel(), f"shape_{i}": tuple(param.shape), f"name_{i}": name_mapper(name)}
             for name, param in iterator
         ])
         display(df)
