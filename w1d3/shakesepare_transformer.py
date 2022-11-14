@@ -263,9 +263,3 @@ model.load_state_dict(state_dict)
 text_output = sampling.sample_tokens(model, mlk, " I pray that one day we might ", max_tokens_generated=300, temperature=1.0, top_k=10)
 print(text_output)
 # %%
-# TODO: 
-# why do we need to surround with spaces?
-# why is bigger seq_len better?
-# why do some models seem to get stuck in local minima?
-# how can we include freq_penalty when punctuation are tokens?
-# why is accuracy < 50%?
