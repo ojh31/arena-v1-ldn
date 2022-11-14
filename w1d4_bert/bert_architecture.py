@@ -70,6 +70,8 @@ def multihead_masked_attention(
 
     returns: shape (batch, seq, nheads*headsize)
     '''
+    if additive_attention_mask is not None:
+        print('multihead_masked_attention start')
     new_Q = rearrange(
         Q, 'batch seq (nheads headsize) -> batch nheads seq headsize', nheads=num_heads
     )
@@ -79,30 +81,48 @@ def multihead_masked_attention(
     new_V = rearrange(
         V, 'batch seq (nheads headsize) -> batch nheads seq headsize', nheads=num_heads
     )
-
-    attention_scores = einsum(
-        'batches nheads seq_Q head_size, batches nheads seq_K head_size -> '
-        'batches nheads seq_Q seq_K', 
-        new_Q, 
-        new_K,
-    )
     batches, _, seq_Q, head_size = new_Q.shape
+    einsum_eq = (
+        'batches nheads seq_Q head_size, '
+        'batches nheads seq_K head_size -> '
+        'batches nheads seq_Q seq_K'
+    )
+    if additive_attention_mask is not None:
+        print(
+            f'multihead_masked_attention first einsum: eq={einsum_eq}, '
+            f'new_Q.shape={new_Q.shape}, new_K.shape={new_K.shape} '
+            f'num_heads={num_heads}'
+        )
+    attention_scores = einsum(einsum_eq, new_Q, new_K)
+    attention_scores /= np.sqrt(head_size)
+    if additive_attention_mask is not None:
+        print('multihead_masked_attention plus additive_attention_mask')
     if additive_attention_mask is not None:
         attention_scores += additive_attention_mask
+    if additive_attention_mask is not None:
+        print('multihead_masked_attention softmax')
     attention_probabilities = nn.functional.softmax(
-        attention_scores / np.sqrt(head_size), dim=-1
+        attention_scores, dim=-1
     )
+    if additive_attention_mask is not None:
+        print('multihead_masked_attention dropout')
     dropped_probabilities = nn.functional.dropout(attention_probabilities, dropout)
+    if additive_attention_mask is not None:
+        print('multihead_masked_attention einsum')
     attention_values = einsum(
         'batches nheads seq_Q seq_K, batches nheads seq_K head_size -> '
         'batches seq_Q nheads head_size', 
         dropped_probabilities, 
         new_V
     )
+    if additive_attention_mask is not None:
+        print('multihead_masked_attention rearrange')
     attention_rearranged = rearrange(
         attention_values, 
         'batches seq_Q nheads head_size -> batches seq_Q (nheads head_size)'
     )
+    if additive_attention_mask is not None:
+        print('multihead_masked_attention end')
     return attention_rearranged
 
 
@@ -126,6 +146,7 @@ class MultiheadAttention(nn.Module):
         '''
         if additive_attention_mask is not None:
             print(f'x.shape={x.shape}, mask.shape={additive_attention_mask.shape}')
+            # print(f'x={x}, mask={additive_attention_mask}')
         QKV = self.W_QKV(x)
         Q = QKV[..., :self.hidden_size]
         K = QKV[..., self.hidden_size:-self.hidden_size]
@@ -210,8 +231,9 @@ class BertCommon(nn.Module):
         used in the attention blocks.
         token_type_ids: (batch, seq) - only used for NSP, passed to token type embedding.
         '''
+        batch, seq = x.shape
         assert isinstance(x, t.Tensor)
-        pos = t.arange(x.shape[1], device=x.device)
+        pos = t.arange(seq, device=x.device)
         if one_zero_attention_mask is None:
             additive_attention_mask = None
         else:
@@ -223,9 +245,10 @@ class BertCommon(nn.Module):
         embedding_sum =  self.token_embedding(x)
         print('Calling positional_embedding...')
         embedding_sum += self.positional_embedding(pos)
-        if token_type_ids is not None:
-            print('Calling segment_embedding')
-            embedding_sum += self.segment_embedding(token_type_ids)
+        if token_type_ids is None:
+            token_type_ids = t.zeros_like(x)
+        print('Calling segment_embedding')
+        embedding_sum += self.segment_embedding(token_type_ids)
         print('Finished embedding sum')
         x = self.layer_norm(embedding_sum)
         x = self.dropout(x)

@@ -446,12 +446,16 @@ def train():
         model.train()
         for input_ids, attention_mask, sentiment_labels, star_labels in progress_bar:
             print('Unpacking trainloader')
-            print(input_ids, attention_mask, sentiment_labels, star_labels)
             input_ids = input_ids.to(device)
             attention_mask = attention_mask.to(device)
             sentiment_labels = sentiment_labels.to(device=device, dtype=t.int)
             star_labels = star_labels.to(device)
             optimizer.zero_grad()
+            print(input_ids, attention_mask, sentiment_labels, star_labels)
+            print(
+                input_ids.shape, attention_mask.shape, 
+                sentiment_labels.shape, star_labels.shape
+            )
             print('Feeding forward...')
             sentiment_hat, star_hat = model(input_ids, attention_mask)
             print('COmputing loss...')
