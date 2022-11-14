@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch as t
 from fancy_einsum import einsum
 from einops import repeat, rearrange, reduce
-from typing import Optional
+from typing import Optional, Tuple
 import numpy as np
 import utils
 
@@ -88,14 +88,7 @@ def multihead_masked_attention(
     )
     batches, _, seq_Q, head_size = new_Q.shape
     if additive_attention_mask is not None:
-        mask_broadcast = repeat(
-            additive_attention_mask, 
-            'seq_K -> batches nheads seq_Q seq_K', 
-            batches=batches, 
-            seq_Q=seq_Q, 
-            nheads=num_heads,
-        )
-        attention_scores += mask_broadcast
+        attention_scores += additive_attention_mask
     attention_probabilities = nn.functional.softmax(
         attention_scores / np.sqrt(head_size), dim=-1
     )
@@ -247,16 +240,43 @@ class BertLanguageModel(nn.Module):
             x,
         )
 
-    def forward(self, x: t.Tensor):
+    def forward(self, x: t.Tensor, one_zero_attention_mask: Optional[t.Tensor] = None,):
         '''
         x: (batch, seq)
         '''
         assert isinstance(x, t.Tensor), f'Bad input to BertLanguageModel.forward: {type(x)} of length {len(x)}'
-        x = self.common(x)
+        x = self.common(x, one_zero_attention_mask=one_zero_attention_mask)
         x = self.linear(x)
         x = self.gelu(x)
         x = self.layer(x)
-        # Tied unembed
         x = self.tied_unembed(x)
         x += self.unembed_bias
         return x
+
+    
+class BertClassifier(nn.Module):
+
+    def __init__(self, config: TransformerConfig) -> None:
+        super().__init__()
+        self.common = BertCommon(config=config)
+        self.dropout = nn.Dropout(p=config.dropout)
+        self.stars = nn.Linear(config.hidden_size, 1)
+        self.sentiment = nn.Linear(config.hidden_size, 2)
+
+    def forward(self, x: t.Tensor, one_zero_attention_mask: Optional[t.Tensor] = None,) -> Tuple[t.Tensor, t.Tensor]:
+        '''
+        x: (batch, seq)
+
+        return: Tuple(sentiment, stars)
+        '''
+        assert isinstance(x, t.Tensor), (
+            f'Bad input to BertClassifier.forward: {type(x)} of length {len(x)}'
+        )
+        print('Calling BertCommon...')
+        x = self.common(x, one_zero_attention_mask=one_zero_attention_mask)
+        print('Taking first position...')
+        x = x[:, 0] # First position only
+        x = self.dropout(x)
+        stars = self.stars(x) * 5 + 5
+        sentiment = self.sentiment(x)
+        return sentiment, stars

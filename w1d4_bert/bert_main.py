@@ -10,6 +10,9 @@ import numpy as np
 import importlib
 from IPython.display import display
 import pandas as pd
+import os
+# This makes a certain kind of error message more legible
+os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 
 #%%
 tokenizer = transformers.AutoTokenizer.from_pretrained("bert-base-cased")
@@ -87,7 +90,8 @@ def print_param_count_from_dicts(
     else:
         return df
 
-
+#%%
+#### Creating BERT and copying weights
 #%%
 importlib.reload(bert_architecture)
 bert_config = bert_architecture.TransformerConfig(
@@ -181,7 +185,7 @@ def test_bert_prediction(predict, model, tokenizer):
 test_bert_prediction(predict, my_bert, tokenizer)
 
 #%% [markdown]
-#### Fine-tuning BERT
+#### Fine-tuning BERT: IMDB
 # %%
 import os
 import re
@@ -202,7 +206,7 @@ DATA_FOLDER = "./data/bert-imdb/"
 IMDB_PATH = os.path.join(DATA_FOLDER, "acllmdb_v1.tar.gz")
 SAVED_TOKENS_PATH = os.path.join(DATA_FOLDER, "tokens.pt")
 
-device = t.device("cuda" if t.cuda.is_available() else "cpu")
+device = t.device('cpu')
 # %%
 def maybe_download(url: str, path: str) -> None:
     """Download the file from url and save it to path. If path already exists, do nothing."""
@@ -240,69 +244,69 @@ assert sum((r.split == "train" for r in reviews)) == 25000
 assert sum((r.split == "test" for r in reviews)) == 25000
 # %%
 reviews[0]
-# %%
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-review_df = pd.DataFrame(reviews)
-review_df['length'] = review_df.text.str.len()
-review_df.head()
-# %%
-fig, ax = plt.subplots()
-sns.histplot(x=review_df.stars, ax=ax, bins=10)
-# %%
-assert review_df.stars.ne(5).any()
-assert review_df.stars.ne(6).any()
-# %%
-review_df.is_positive.value_counts()
-# %%
-review_df.split.value_counts()
-# %%
-fig, ax = plt.subplots()
-sns.histplot(x=review_df.length, ax=ax, bins=200)
-ax.set_xlim([0, 2000])
-# %%
-review_df.length.describe()
-# %%
-fig, ax = plt.subplots()
-sns.histplot(x=review_df.stars, hue=review_df.is_positive, ax=ax, bins=10)
-#%%
-fig, ax = plt.subplots()
-sns.histplot(x=review_df.length, hue=review_df.is_positive, ax=ax, bins=200)
-ax.set_xlim([0, 2000])
-# %%
-assert review_df.loc[review_df.is_positive].stars.min() == 7
-# %%
-assert review_df.loc[~review_df.is_positive].stars.max() == 4
-# %%
-import ftfy
-# %%
-review_df['badness'] = [
-    ftfy.badness.badness(text) for text in review_df.text
-]
-#%%
-review_df.badness.gt(0).sum(), len(review_df)
-# %%
-fig, ax = plt.subplots()
-sns.histplot(x=review_df.loc[review_df.badness.gt(0)].badness, ax=ax)
-# %%
-review_df.badness.sum()
-# %%
-review_df.loc[review_df.badness.gt(0)].text.iloc[0]
-# %%
-review_df.loc[review_df.badness.gt(0)].badness.iloc[0]
-# %%
-ftfy.fix_text(review_df.loc[review_df.badness.gt(0)].text.iloc[0])
-# Fixes the \x85 ellipses
-# %%
-from lingua import LanguageDetectorBuilder
-detector = LanguageDetectorBuilder.from_all_languages().build()
-# %%
-languages = []
-for text in tqdm(review_df.text.sample(n=1_000)):
-    languages.append(detector.detect_language_of(text))
-# %%
-pd.Series(languages).value_counts()
+# # %%
+# import pandas as pd
+# import matplotlib.pyplot as plt
+# import seaborn as sns
+# review_df = pd.DataFrame(reviews)
+# review_df['length'] = review_df.text.str.len()
+# review_df.head()
+# # %%
+# fig, ax = plt.subplots()
+# sns.histplot(x=review_df.stars, ax=ax, bins=10)
+# # %%
+# assert review_df.stars.ne(5).any()
+# assert review_df.stars.ne(6).any()
+# # %%
+# review_df.is_positive.value_counts()
+# # %%
+# review_df.split.value_counts()
+# # %%
+# fig, ax = plt.subplots()
+# sns.histplot(x=review_df.length, ax=ax, bins=200)
+# ax.set_xlim([0, 2000])
+# # %%
+# review_df.length.describe()
+# # %%
+# fig, ax = plt.subplots()
+# sns.histplot(x=review_df.stars, hue=review_df.is_positive, ax=ax, bins=10)
+# #%%
+# fig, ax = plt.subplots()
+# sns.histplot(x=review_df.length, hue=review_df.is_positive, ax=ax, bins=200)
+# ax.set_xlim([0, 2000])
+# # %%
+# assert review_df.loc[review_df.is_positive].stars.min() == 7
+# # %%
+# assert review_df.loc[~review_df.is_positive].stars.max() == 4
+# # %%
+# import ftfy
+# # %%
+# review_df['badness'] = [
+#     ftfy.badness.badness(text) for text in review_df.text
+# ]
+# #%%
+# review_df.badness.gt(0).sum(), len(review_df)
+# # %%
+# fig, ax = plt.subplots()
+# sns.histplot(x=review_df.loc[review_df.badness.gt(0)].badness, ax=ax)
+# # %%
+# review_df.badness.sum()
+# # %%
+# review_df.loc[review_df.badness.gt(0)].text.iloc[0]
+# # %%
+# review_df.loc[review_df.badness.gt(0)].badness.iloc[0]
+# # %%
+# ftfy.fix_text(review_df.loc[review_df.badness.gt(0)].text.iloc[0])
+# # Fixes the \x85 ellipses
+# # %%
+# from lingua import LanguageDetectorBuilder
+# detector = LanguageDetectorBuilder.from_all_languages().build()
+# # %%
+# languages = []
+# for text in tqdm(review_df.text.sample(n=100)):
+#     languages.append(detector.detect_language_of(text))
+# # %%
+# pd.Series(languages).value_counts()
 # %%
 from torch.utils.data import TensorDataset
 
@@ -322,6 +326,7 @@ def to_dataset(tokenizer, reviews: list[Review]) -> TensorDataset:
         max_length=tokenizer.model_max_length,
         return_tensors='pt',
         truncation=True,
+        padding=True,
     )
     input_ids = encoding['input_ids']
     attention_mask = encoding['attention_mask']
@@ -330,7 +335,161 @@ def to_dataset(tokenizer, reviews: list[Review]) -> TensorDataset:
     return TensorDataset(input_ids, attention_mask, sentiment_labels, star_labels)
 
 tokenizer = transformers.AutoTokenizer.from_pretrained("bert-base-cased")
+#%%
 train_data = to_dataset(tokenizer, [r for r in reviews if r.split == "train"])
 test_data = to_dataset(tokenizer, [r for r in reviews if r.split == "test"])
 t.save((train_data, test_data), SAVED_TOKENS_PATH)
+# %%
+def copy_weights_from_bert_common(
+    my_bert: bert_architecture.BertLanguageModel, 
+    bert: transformers.models.bert.modeling_bert.BertForMaskedLM
+) -> bert_architecture.BertLanguageModel:
+    '''
+    Copy over the weights from bert to your implementation of bert.
+
+    bert should be imported using: 
+        bert = transformers.BertForMaskedLM.from_pretrained("bert-base-cased")
+
+    Returns your bert model, with weights loaded in.
+    '''
+    bert_params = reformat_params(dict(bert.named_parameters()))
+    assert set(bert_params.keys()) == set(my_params)
+    bert_params = {k: v for k, v in bert_params.items() if 'common' in k}
+    classifier_params = {
+        'stars.weight': t.randn((1, bert_config.hidden_size)),
+        'stars.bias': t.randn((1)),
+        'sentiment.weight': t.randn((2, bert_config.hidden_size)),
+        'sentiment.bias': t.randn((2)),
+    }
+    bert_params.update(classifier_params)
+    my_bert.load_state_dict(bert_params)
+    return my_bert
+
+#%%
+importlib.reload(bert_architecture)
+classifier = bert_architecture.BertClassifier(bert_config)
+# %%
+loaded_classifier = copy_weights_from_bert_common(classifier, bert)
+#%%
+# import wandb
+from tqdm.notebook import tqdm_notebook
+from torch.utils.data import DataLoader
+# %%
+def train():
+ 
+    # wandb.init(
+    #     project='imdb',
+    #     config = {
+    #         'batch_size': 16,
+    #         'hidden_size': bert_config.hidden_size,
+    #         'lr': 2e-5,
+    #         'epochs': 2,
+    #         'max_seq_len': bert_config.max_seq_len,
+    #         'dropout': 0.1,
+    #         'num_layers': bert_config.num_layers,
+    #         'num_heads': bert_config.num_heads,
+    #         'loss_weight': .02,
+    #         'clip_grad': 1.0,
+    #         'weight_decay': .01,
+    #     }
+    # ) 
+
+    batch_size = 16 # wandb.config.batch_size
+    epochs = 2 # wandb.config.epochs
+    lr = 2e-5 # wandb.config.lr
+    clip_grad = 1.0 # wandb.config.clip_grad
+    loss_weight = .02 # wandb.config.loss_weight
+    weight_decay = .01 # wangb.config.weight_decay
+
+    print('Loading model...')
+
+    model = bert_architecture.BertClassifier(bert_config)
+    model = copy_weights_from_bert_common(model, bert)
+    model = model.to(device).train()
+
+    print('Creating optimiser...')
+    optimizer = t.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    sentiment_loss_fn = nn.CrossEntropyLoss()
+    stars_loss_fn = nn.functional.l1_loss
+
+    examples_seen = 0
+    start_time = time.time()
+
+    print('Loading data...')
+
+    train_data, test_data = t.load(SAVED_TOKENS_PATH)
+    train_dataloader = DataLoader(
+        train_data, batch_size=batch_size, shuffle=True
+    )
+    test_dataloader = DataLoader(
+        test_data, batch_size=batch_size, shuffle=True
+    )
+    
+    def loss_fn(y_hat, y):
+        sentiment_hat, star_hat = y_hat
+        sentiment_labels, star_labels = y
+        loss = (
+            sentiment_loss_fn(sentiment_hat, sentiment_labels) + 
+            stars_loss_fn(star_labels, star_hat) * loss_weight
+        )
+        return loss
+
+    
+    # wandb.watch(model, criterion=loss_fn, log="all", log_freq=10, log_graph=True)
+
+    print('Starting epochs...')
+
+    for epoch in range(epochs):
+        progress_bar = tqdm_notebook(train_dataloader)
+
+        print('model.train(')
+        model.train()
+        for input_ids, attention_mask, sentiment_labels, star_labels in progress_bar:
+            print('Unpacking trainloader')
+            print(input_ids, attention_mask, sentiment_labels, star_labels)
+            input_ids = input_ids.to(device)
+            attention_mask = attention_mask.to(device)
+            sentiment_labels = sentiment_labels.to(device=device, dtype=t.int)
+            star_labels = star_labels.to(device)
+            optimizer.zero_grad()
+            print('Feeding forward...')
+            return model, input_ids, attention_mask
+            sentiment_hat, star_hat = model(input_ids, attention_mask)
+            print('COmputing loss...')
+            loss = loss_fn((sentiment_hat, star_hat), (sentiment_labels, star_labels))
+            loss.backward()
+            t.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
+            optimizer.step()
+            progress_bar.set_description(f"Epoch = {epoch}, Loss = {loss.item():.4f}")
+            examples_seen += len(input_ids)
+            # wandb.log(
+            #     {"train_loss": loss, "elapsed": time.time() - start_time}, step=examples_seen
+            # )
+
+        print('model.eval(')
+        with t.inference_mode():
+            model.eval()
+            sentiment_correct = 0
+            total = 0
+            for input_ids, attention_mask, sentiment_labels, star_labels in test_dataloader:
+                input_ids = input_ids.to(device)
+                attention_mask = attention_mask.to(device)
+                star_labels = star_labels.to(device)
+                sentiment_labels = sentiment_labels.to(device=device, dtype=t.int)
+                sentiment_hat, star_hat = model(input_ids, attention_mask)
+                sentiment_predictions = sentiment_hat.argmax(-1)
+                sentiment_correct += (sentiment_predictions == sentiment_labels).sum().item() 
+                total += star_labels.size(0)
+
+            # wandb.log({"sentiment_accuracy": sentiment_correct/total}, step=examples_seen)
+
+        print(f"Epoch {epoch+1}/{epochs}, train loss is {loss:.6f}, accuracy is {sentiment_correct}/{total}")
+
+    # filename = f"{wandb.run.dir}/model_state_dict.pt"
+    # print(f"Saving model to: {filename}")
+    # t.save(model.state_dict(), filename)
+    # wandb.save(filename)
+    return model
+# %%
+model, input_ids, attention_mask = train()
 # %%
