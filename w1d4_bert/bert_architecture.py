@@ -99,10 +99,11 @@ def multihead_masked_attention(
         dropped_probabilities, 
         new_V
     )
-    return rearrange(
+    attention_rearranged = rearrange(
         attention_values, 
         'batches seq_Q nheads head_size -> batches seq_Q (nheads head_size)'
     )
+    return attention_rearranged
 
 
 #%%
@@ -123,6 +124,8 @@ class MultiheadAttention(nn.Module):
 
         Return: shape (batch, seq, hidden_size)
         '''
+        if additive_attention_mask is not None:
+            print(f'x.shape={x.shape}, mask.shape={additive_attention_mask.shape}')
         QKV = self.W_QKV(x)
         Q = QKV[..., :self.hidden_size]
         K = QKV[..., self.hidden_size:-self.hidden_size]
@@ -164,9 +167,13 @@ class BertBlock(nn.Module):
     def forward(
         self, x: t.Tensor, additive_attention_mask: t.Tensor
     ) -> t.Tensor:
+        print(f'Calling attention')
         att = self.attention(x, additive_attention_mask)
+        print('Calling layer_norm1')
         att_sum = self.layer_norm1(x + att)
+        print('Calling mlp...')
         mlp = self.mlp(att_sum)
+        print('Calling layer_norm2...')
         mlp_sum = self.layer_norm2(att_sum + mlp)
         return mlp_sum
 
@@ -208,15 +215,21 @@ class BertCommon(nn.Module):
         if one_zero_attention_mask is None:
             additive_attention_mask = None
         else:
+            print('Calling make_additive_attention_mask')
             additive_attention_mask = make_additive_attention_mask(
                 one_zero_attention_mask
             )
+        print('Calling token_embedding')
         embedding_sum =  self.token_embedding(x)
+        print('Calling positional_embedding...')
         embedding_sum += self.positional_embedding(pos)
         if token_type_ids is not None:
+            print('Calling segment_embedding')
             embedding_sum += self.segment_embedding(token_type_ids)
+        print('Finished embedding sum')
         x = self.layer_norm(embedding_sum)
         x = self.dropout(x)
+        print('Starting bert blocks...')
         for block in self.bert_blocks:
             x = block(x, additive_attention_mask)
         return x

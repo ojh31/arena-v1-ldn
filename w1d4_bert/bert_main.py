@@ -453,7 +453,6 @@ def train():
             star_labels = star_labels.to(device)
             optimizer.zero_grad()
             print('Feeding forward...')
-            return model, input_ids, attention_mask
             sentiment_hat, star_hat = model(input_ids, attention_mask)
             print('COmputing loss...')
             loss = loss_fn((sentiment_hat, star_hat), (sentiment_labels, star_labels))
@@ -491,5 +490,5 @@ def train():
     # wandb.save(filename)
     return model
 # %%
-model, input_ids, attention_mask = train()
+model = train()
 # %%
