@@ -25,8 +25,14 @@ def make_additive_attention_mask(
         shape (batch, nheads=1, seqQ=1, seqK)
         Contains 0 if attention is allowed, big_negative_number if not.
     '''
-    assert isinstance(one_zero_attention_mask, t.Tensor)
-    assert isinstance(big_negative_number, float)
+    assert isinstance(one_zero_attention_mask, t.Tensor), (
+        f'one_zero_attention_mask={one_zero_attention_mask}'
+    )
+    is_float = isinstance(big_negative_number, float) 
+    is_int = isinstance(big_negative_number, int)
+    assert is_float or is_int, (
+        f'big_negative_number ={big_negative_number}'
+    )
     filled = t.where(
         one_zero_attention_mask == 0, 
         big_negative_number,
@@ -162,8 +168,10 @@ class BertBlock(nn.Module):
         self.mlp = BertMLP(config)
         self.layer_norm2 = nn.LayerNorm(config.hidden_size, config.layer_norm_epsilon)
 
-    def forward(self, x: t.Tensor) -> t.Tensor:
-        att = self.attention(x)
+    def forward(
+        self, x: t.Tensor, additive_attention_mask: t.Tensor
+    ) -> t.Tensor:
+        att = self.attention(x, additive_attention_mask)
         att_sum = self.layer_norm1(x + att)
         mlp = self.mlp(att_sum)
         mlp_sum = self.layer_norm2(att_sum + mlp)
@@ -174,8 +182,12 @@ class BertCommon(nn.Module):
 
     def __init__(self, config: TransformerConfig):
         super().__init__()
-        self.token_embedding = nn.Embedding(config.vocab_size, config.hidden_size)
-        self.positional_embedding = nn.Embedding(config.max_seq_len, config.hidden_size)
+        self.token_embedding = nn.Embedding(
+            config.vocab_size, config.hidden_size
+        )
+        self.positional_embedding = nn.Embedding(
+            config.max_seq_len, config.hidden_size
+        )
         self.segment_embedding = nn.Embedding(
             num_embeddings=2, embedding_dim=config.hidden_size
         )
@@ -200,7 +212,12 @@ class BertCommon(nn.Module):
         '''
         assert isinstance(x, t.Tensor)
         pos = t.arange(x.shape[1], device=x.device)
-        additive_attention_mask = make_additive_attention_mask(one_zero_attention_mask)
+        if one_zero_attention_mask is None:
+            additive_attention_mask = None
+        else:
+            additive_attention_mask = make_additive_attention_mask(
+                one_zero_attention_mask
+            )
         embedding_sum =  self.token_embedding(x)
         embedding_sum += self.positional_embedding(pos)
         if token_type_ids is not None:

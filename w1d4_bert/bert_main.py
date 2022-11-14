@@ -154,12 +154,11 @@ def predict(model, tokenizer, text: str, k=15) -> List[List[str]]:
     Return a list of k strings for each [MASK] in the input.
     '''
     tokens = tokenizer.encode(text, return_tensors='pt')
-    print(tokens)
     with t.inference_mode():
         output = model.eval()(tokens)
     all_logits = output if isinstance(output, t.Tensor) else output.logits
     strings_per_mask = []
-    for i, token in enumerate(tokens):
+    for i, token in enumerate(tokens.tolist()[0]):
         if token != tokenizer.mask_token_id:
             continue
         logits = all_logits[0, i]
