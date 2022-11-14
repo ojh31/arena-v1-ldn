@@ -180,4 +180,157 @@ def test_bert_prediction(predict, model, tokenizer):
 #%%
 test_bert_prediction(predict, my_bert, tokenizer)
 
+#%% [markdown]
+#### Fine-tuning BERT
+# %%
+import os
+import re
+import tarfile
+from dataclasses import dataclass
+import requests
+import torch as t
+import transformers
+from torch.utils.data import TensorDataset
+from tqdm.auto import tqdm
+import plotly.express as px
+import pandas as pd
+from typing import Callable, Optional, List
+import time
+
+IMDB_URL = "https://ai.stanford.edu/~amaas/data/sentiment/aclImdb_v1.tar.gz"
+DATA_FOLDER = "./data/bert-imdb/"
+IMDB_PATH = os.path.join(DATA_FOLDER, "acllmdb_v1.tar.gz")
+SAVED_TOKENS_PATH = os.path.join(DATA_FOLDER, "tokens.pt")
+
+device = t.device("cuda" if t.cuda.is_available() else "cpu")
+# %%
+def maybe_download(url: str, path: str) -> None:
+    """Download the file from url and save it to path. If path already exists, do nothing."""
+    if not os.path.exists(IMDB_PATH):
+        with open(IMDB_PATH, "wb") as file:
+            data = requests.get(url).content
+            file.write(data)
+
+os.makedirs(DATA_FOLDER, exist_ok=True)
+expected_hexdigest = "d41d8cd98f00b204e9800998ecf8427e"
+maybe_download(IMDB_URL, IMDB_PATH)
+
+@dataclass(frozen=True)
+class Review:
+    split: str
+    is_positive: bool
+    stars: int
+    text: str
+
+def load_reviews(path: str) -> list[Review]:
+    reviews = []
+    tar = tarfile.open(path, "r:gz")
+    for member in tqdm(tar.getmembers()):
+        m = re.match(r"aclImdb/(train|test)/(pos|neg)/\d+_(\d+)\.txt", member.name)
+        if m is not None:
+            split, posneg, stars = m.groups()
+            buf = tar.extractfile(member)
+            assert buf is not None
+            text = buf.read().decode("utf-8")
+            reviews.append(Review(split, posneg == "pos", int(stars), text))
+    return reviews
+        
+reviews = load_reviews(IMDB_PATH)
+assert sum((r.split == "train" for r in reviews)) == 25000
+assert sum((r.split == "test" for r in reviews)) == 25000
+# %%
+reviews[0]
+# %%
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+review_df = pd.DataFrame(reviews)
+review_df['length'] = review_df.text.str.len()
+review_df.head()
+# %%
+fig, ax = plt.subplots()
+sns.histplot(x=review_df.stars, ax=ax, bins=10)
+# %%
+assert review_df.stars.ne(5).any()
+assert review_df.stars.ne(6).any()
+# %%
+review_df.is_positive.value_counts()
+# %%
+review_df.split.value_counts()
+# %%
+fig, ax = plt.subplots()
+sns.histplot(x=review_df.length, ax=ax, bins=200)
+ax.set_xlim([0, 2000])
+# %%
+review_df.length.describe()
+# %%
+fig, ax = plt.subplots()
+sns.histplot(x=review_df.stars, hue=review_df.is_positive, ax=ax, bins=10)
+#%%
+fig, ax = plt.subplots()
+sns.histplot(x=review_df.length, hue=review_df.is_positive, ax=ax, bins=200)
+ax.set_xlim([0, 2000])
+# %%
+assert review_df.loc[review_df.is_positive].stars.min() == 7
+# %%
+assert review_df.loc[~review_df.is_positive].stars.max() == 4
+# %%
+import ftfy
+# %%
+review_df['badness'] = [
+    ftfy.badness.badness(text) for text in review_df.text
+]
+#%%
+review_df.badness.gt(0).sum(), len(review_df)
+# %%
+fig, ax = plt.subplots()
+sns.histplot(x=review_df.loc[review_df.badness.gt(0)].badness, ax=ax)
+# %%
+review_df.badness.sum()
+# %%
+review_df.loc[review_df.badness.gt(0)].text.iloc[0]
+# %%
+review_df.loc[review_df.badness.gt(0)].badness.iloc[0]
+# %%
+ftfy.fix_text(review_df.loc[review_df.badness.gt(0)].text.iloc[0])
+# Fixes the \x85 ellipses
+# %%
+from lingua import LanguageDetectorBuilder
+detector = LanguageDetectorBuilder.from_all_languages().build()
+# %%
+languages = []
+for text in tqdm(review_df.text.sample(n=1_000)):
+    languages.append(detector.detect_language_of(text))
+# %%
+pd.Series(languages).value_counts()
+# %%
+from torch.utils.data import TensorDataset
+
+def to_dataset(tokenizer, reviews: list[Review]) -> TensorDataset:
+    '''Tokenize the reviews (which should all belong to the same split) and 
+    bundle into a TensorDataset.
+
+    The tensors in the TensorDataset should be (in this exact order):
+
+    input_ids: shape (batch, sequence length), dtype int64
+    attention_mask: shape (batch, sequence_length), dtype int
+    sentiment_labels: shape (batch, ), dtype int
+    star_labels: shape (batch, ), dtype int
+    '''
+    encoding = tokenizer.batch_encode_plus(
+        [review.text for review in reviews],
+        max_length=tokenizer.model_max_length,
+        return_tensors='pt',
+        truncation=True,
+    )
+    input_ids = encoding['input_ids']
+    attention_mask = encoding['attention_mask']
+    sentiment_labels = t.tensor([review.is_positive for review in reviews])
+    star_labels = t.tensor([review.stars for review in reviews])
+    return TensorDataset(input_ids, attention_mask, sentiment_labels, star_labels)
+
+tokenizer = transformers.AutoTokenizer.from_pretrained("bert-base-cased")
+train_data = to_dataset(tokenizer, [r for r in reviews if r.split == "train"])
+test_data = to_dataset(tokenizer, [r for r in reviews if r.split == "test"])
+t.save((train_data, test_data), SAVED_TOKENS_PATH)
 # %%
