@@ -19,6 +19,7 @@ from bert_params import copy_weights_from_bert_common, reformat_params
 import wandb
 from tqdm.notebook import tqdm_notebook
 from torch.utils.data import DataLoader
+from typing import Tuple, List, Optional
 #%%
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1" # This makes a certain kind of error message more legible
 device = t.device('cuda')
@@ -28,9 +29,9 @@ tokenizer = transformers.AutoTokenizer.from_pretrained("bert-base-cased")
 bert = transformers.AutoModelForCausalLM.from_pretrained("bert-base-cased").train()
 #%%
 bert_config = bert_architecture.TransformerConfig(
-    num_layers=4,
-    hidden_size=32,
-    num_heads=2,
+    num_layers=12,
+    hidden_size=768,
+    num_heads=12,
     vocab_size=tokenizer.vocab_size,
     dropout=0.1,
     layer_norm_epsilon=1e-12,
@@ -169,8 +170,9 @@ def to_dataset(tokenizer, reviews: list[Review]) -> TensorDataset:
     return TensorDataset(input_ids, attention_mask, sentiment_labels, star_labels)
 
 #%%
-train_data = to_dataset(tokenizer, [r for r in reviews if r.split == "train"])
-test_data = to_dataset(tokenizer, [r for r in reviews if r.split == "test"])
+import random
+train_data = to_dataset(tokenizer, random.sample([r for r in reviews if r.split == "train"], 500))
+test_data = to_dataset(tokenizer, random.sample([r for r in reviews if r.split == "test"], 100))
 t.save((train_data, test_data), SAVED_TOKENS_PATH)
 # %%
 #%%
@@ -186,7 +188,7 @@ def train():
     #         'batch_size': 16,
     #         'hidden_size': bert_config.hidden_size,
     #         'lr': 2e-5,
-    #         'epochs': 2,
+    #         'epochs': 1,
     #         'max_seq_len': bert_config.max_seq_len,
     #         'dropout': 0.1,
     #         'num_layers': bert_config.num_layers,
@@ -198,16 +200,19 @@ def train():
     # ) 
 
     batch_size = 1 # wandb.config.batch_size
-    epochs = 2 # wandb.config.epochs
+    epochs = 1 # wandb.config.epochs
     lr = 2e-5 # wandb.config.lr
     clip_grad = 1.0 # wandb.config.clip_grad
-    loss_weight = .02 # wandb.config.loss_weight
+    stars_weight = .02 # wandb.config.loss_weight
+    sentiment_weight = 1.0
     weight_decay = .01 # wandb.config.weight_decay
 
     print('Loading model...')
 
     model = bert_architecture.BertClassifier(bert_config)
-    # model = copy_weights_from_bert_common(model, bert, hidden_size=bert_config.hidden_size)
+    model = copy_weights_from_bert_common(
+        model, bert, hidden_size=bert_config.hidden_size
+    )
     model = model.to(device).train()
 
     print('Creating optimiser...')
@@ -221,34 +226,31 @@ def train():
     print('Loading data...')
 
     train_data, test_data = t.load(SAVED_TOKENS_PATH)
-    indices = list(range(1000))
-    train_data = t.utils.data.Subset(train_data, indices)
-    test_data = t.utils.data.Subset(test_data, indices)
     train_dataloader = DataLoader(
         train_data, batch_size=batch_size, shuffle=True
     )
     test_dataloader = DataLoader(
         test_data, batch_size=batch_size, shuffle=True
     )
-    test_data = test_data[:1000]
     
-    def loss_fn(y_hat, y):
+    def loss_fn(y_hat: Tuple[t.Tensor, t.Tensor], y: Tuple[t.Tensor, t.Tensor]):
         sentiment_hat, star_hat = y_hat
         sentiment_labels, star_labels = y
+        sentiment_loss = sentiment_loss_fn(
+            sentiment_hat, sentiment_labels
+        ).float().squeeze()
+        stars_loss = stars_loss_fn(star_labels.float().squeeze(), star_hat.squeeze())
         loss = (
-            sentiment_loss_fn(sentiment_hat, sentiment_labels).float().squeeze() + 
-            stars_loss_fn(star_labels.float(), star_hat.squeeze()) * loss_weight
+            sentiment_loss * sentiment_weight + stars_loss * stars_weight
         )
         return loss
 
     # wandb.watch(model, criterion=loss_fn, log="all", log_freq=10, log_graph=True)
 
-    print('Starting epochs...')
-
     for epoch in range(epochs):
-        progress_bar = tqdm_notebook(train_dataloader)
 
         model.train()
+        progress_bar = tqdm_notebook(train_dataloader)
         for input_ids, attention_mask, sentiment_labels, star_labels in progress_bar:
             input_ids = input_ids.to(device)
             attention_mask = attention_mask.to(device)
@@ -268,24 +270,31 @@ def train():
             #     {"train_loss": loss, "elapsed": time.time() - start_time}, step=examples_seen
             # )
 
-        # print('model.eval(')
-        # with t.inference_mode():
-        #     model.eval()
-        #     sentiment_correct = 0
-        #     total = 0
-        #     for input_ids, attention_mask, sentiment_labels, star_labels in test_dataloader:
-        #         input_ids = input_ids.to(device)
-        #         attention_mask = attention_mask.to(device)
-        #         star_labels = star_labels.to(device)
-        #         sentiment_labels = sentiment_labels.to(device=device, dtype=t.long)
-        #         sentiment_hat, star_hat = model(input_ids, attention_mask)
-        #         sentiment_predictions = sentiment_hat.argmax(-1)
-        #         sentiment_correct += (sentiment_predictions == sentiment_labels).sum().item() 
-        #         total += star_labels.size(0)
+        with t.inference_mode():
+            model.eval()
+            star_correct = 0
+            sentiment_correct = 0
+            total = 0
+            for input_ids, attention_mask, sentiment_labels, star_labels in tqdm_notebook(test_dataloader):
+                input_ids = input_ids.to(device)
+                attention_mask = attention_mask.to(device)
+                star_labels = star_labels.to(device)
+                sentiment_labels = sentiment_labels.to(device=device, dtype=t.long)
+                y_hat = model(input_ids, attention_mask)
+                sentiment_hat = y_hat['sentiment']
+                star_hat = y_hat['stars']
+                sentiment_predictions = sentiment_hat.argmax(-1)
+                sentiment_correct += (sentiment_predictions == sentiment_labels).sum().item() 
+                star_correct += t.abs(star_hat - star_labels).lt(1).sum().item() 
+                total += star_labels.size(0)
 
             # wandb.log({"sentiment_accuracy": sentiment_correct/total}, step=examples_seen)
 
-        # print(f"Epoch {epoch+1}/{epochs}, train loss is {loss:.6f}, accuracy is {sentiment_correct}/{total}")
+        print(
+            f"Epoch {epoch+1}/{epochs}, train loss is {loss:.6f}, "
+            f"sentiment accuracy is {sentiment_correct}/{total}, "
+            f"star accuracy is {star_correct}/{total}, "
+        )
 
     # filename = f"{wandb.run.dir}/model_state_dict.pt"
     # print(f"Saving model to: {filename}")
