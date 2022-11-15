@@ -28,9 +28,9 @@ tokenizer = transformers.AutoTokenizer.from_pretrained("bert-base-cased")
 bert = transformers.AutoModelForCausalLM.from_pretrained("bert-base-cased").train()
 #%%
 bert_config = bert_architecture.TransformerConfig(
-    num_layers=12,
-    hidden_size=768,
-    num_heads=12,
+    num_layers=4,
+    hidden_size=32,
+    num_heads=2,
     vocab_size=tokenizer.vocab_size,
     dropout=0.1,
     layer_norm_epsilon=1e-12,
@@ -174,9 +174,9 @@ test_data = to_dataset(tokenizer, [r for r in reviews if r.split == "test"])
 t.save((train_data, test_data), SAVED_TOKENS_PATH)
 # %%
 #%%
-importlib.reload(bert_architecture)
-classifier = bert_architecture.BertClassifier(bert_config)
-classifier = copy_weights_from_bert_common(classifier, bert, hidden_size=bert_config.hidden_size)
+# importlib.reload(bert_architecture)
+# classifier = bert_architecture.BertClassifier(bert_config)
+# classifier = copy_weights_from_bert_common(classifier, bert, hidden_size=bert_config.hidden_size)
 # %%
 def train():
  
@@ -197,7 +197,7 @@ def train():
     #     }
     # ) 
 
-    batch_size = 4 # wandb.config.batch_size
+    batch_size = 1 # wandb.config.batch_size
     epochs = 2 # wandb.config.epochs
     lr = 2e-5 # wandb.config.lr
     clip_grad = 1.0 # wandb.config.clip_grad
@@ -207,7 +207,7 @@ def train():
     print('Loading model...')
 
     model = bert_architecture.BertClassifier(bert_config)
-    model = copy_weights_from_bert_common(model, bert, hidden_size=bert_config.hidden_size)
+    # model = copy_weights_from_bert_common(model, bert, hidden_size=bert_config.hidden_size)
     model = model.to(device).train()
 
     print('Creating optimiser...')
@@ -221,12 +221,16 @@ def train():
     print('Loading data...')
 
     train_data, test_data = t.load(SAVED_TOKENS_PATH)
+    indices = list(range(1000))
+    train_data = t.utils.data.Subset(train_data, indices)
+    test_data = t.utils.data.Subset(test_data, indices)
     train_dataloader = DataLoader(
         train_data, batch_size=batch_size, shuffle=True
     )
     test_dataloader = DataLoader(
         test_data, batch_size=batch_size, shuffle=True
     )
+    test_data = test_data[:1000]
     
     def loss_fn(y_hat, y):
         sentiment_hat, star_hat = y_hat
@@ -244,41 +248,16 @@ def train():
     for epoch in range(epochs):
         progress_bar = tqdm_notebook(train_dataloader)
 
-        print('model.train(')
         model.train()
         for input_ids, attention_mask, sentiment_labels, star_labels in progress_bar:
-            print('Unpacking trainloader')
             input_ids = input_ids.to(device)
             attention_mask = attention_mask.to(device)
             sentiment_labels = sentiment_labels.to(device=device, dtype=t.long)
             star_labels = star_labels.to(device)
             optimizer.zero_grad()
-            # print(input_ids, attention_mask, sentiment_labels, star_labels)
-            print(
-                input_ids.shape, attention_mask.shape, 
-                sentiment_labels.shape, star_labels.shape
-            )
-            print(
-                input_ids.dtype, attention_mask.dtype, 
-                sentiment_labels.dtype, star_labels.dtype
-            )
-            print('Feeding forward...')
             y_hat = model(input_ids, attention_mask)
             sentiment_hat = y_hat['sentiment']
             star_hat = y_hat['stars']
-            print('Computing loss...')
-            print(
-                sentiment_hat.shape,
-                star_hat.shape,
-                sentiment_labels.shape,
-                star_labels.shape,
-            )
-            print(
-                sentiment_hat.dtype,
-                star_hat.dtype,
-                sentiment_labels.dtype,
-                star_labels.dtype,
-            )
             loss = loss_fn((sentiment_hat, star_hat), (sentiment_labels, star_labels))
             loss.backward()
             t.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
@@ -289,24 +268,24 @@ def train():
             #     {"train_loss": loss, "elapsed": time.time() - start_time}, step=examples_seen
             # )
 
-        print('model.eval(')
-        with t.inference_mode():
-            model.eval()
-            sentiment_correct = 0
-            total = 0
-            for input_ids, attention_mask, sentiment_labels, star_labels in test_dataloader:
-                input_ids = input_ids.to(device)
-                attention_mask = attention_mask.to(device)
-                star_labels = star_labels.to(device)
-                sentiment_labels = sentiment_labels.to(device=device, dtype=t.long)
-                sentiment_hat, star_hat = model(input_ids, attention_mask)
-                sentiment_predictions = sentiment_hat.argmax(-1)
-                sentiment_correct += (sentiment_predictions == sentiment_labels).sum().item() 
-                total += star_labels.size(0)
+        # print('model.eval(')
+        # with t.inference_mode():
+        #     model.eval()
+        #     sentiment_correct = 0
+        #     total = 0
+        #     for input_ids, attention_mask, sentiment_labels, star_labels in test_dataloader:
+        #         input_ids = input_ids.to(device)
+        #         attention_mask = attention_mask.to(device)
+        #         star_labels = star_labels.to(device)
+        #         sentiment_labels = sentiment_labels.to(device=device, dtype=t.long)
+        #         sentiment_hat, star_hat = model(input_ids, attention_mask)
+        #         sentiment_predictions = sentiment_hat.argmax(-1)
+        #         sentiment_correct += (sentiment_predictions == sentiment_labels).sum().item() 
+        #         total += star_labels.size(0)
 
             # wandb.log({"sentiment_accuracy": sentiment_correct/total}, step=examples_seen)
 
-        print(f"Epoch {epoch+1}/{epochs}, train loss is {loss:.6f}, accuracy is {sentiment_correct}/{total}")
+        # print(f"Epoch {epoch+1}/{epochs}, train loss is {loss:.6f}, accuracy is {sentiment_correct}/{total}")
 
     # filename = f"{wandb.run.dir}/model_state_dict.pt"
     # print(f"Saving model to: {filename}")
