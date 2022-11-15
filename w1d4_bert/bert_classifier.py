@@ -20,8 +20,8 @@ import wandb
 from tqdm.notebook import tqdm_notebook
 from torch.utils.data import DataLoader
 #%%
-# This makes a certain kind of error message more legible
-os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
+os.environ['CUDA_LAUNCH_BLOCKING'] = "1" # This makes a certain kind of error message more legible
+device = t.device('cuda')
 
 #%%
 tokenizer = transformers.AutoTokenizer.from_pretrained("bert-base-cased")
@@ -41,8 +41,6 @@ IMDB_URL = "https://ai.stanford.edu/~amaas/data/sentiment/aclImdb_v1.tar.gz"
 DATA_FOLDER = "./data/bert-imdb/"
 IMDB_PATH = os.path.join(DATA_FOLDER, "acllmdb_v1.tar.gz")
 SAVED_TOKENS_PATH = os.path.join(DATA_FOLDER, "tokens.pt")
-
-device = t.device('cpu')
 # %%
 def maybe_download(url: str, path: str) -> None:
     """Download the file from url and save it to path. If path already exists, do nothing."""
