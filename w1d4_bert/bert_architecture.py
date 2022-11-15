@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch as t
 from fancy_einsum import einsum
 from einops import repeat, rearrange, reduce
-from typing import Optional, Tuple
+from typing import Optional, Dict
 import numpy as np
 import utils
 
@@ -42,7 +42,8 @@ def make_additive_attention_mask(
     return reshaped
 
 #%%
-utils.test_make_additive_attention_mask(make_additive_attention_mask)
+if __name__ == '__main__':
+    utils.test_make_additive_attention_mask(make_additive_attention_mask)
 
 @dataclass(frozen=True)
 class TransformerConfig:
@@ -70,8 +71,6 @@ def multihead_masked_attention(
 
     returns: shape (batch, seq, nheads*headsize)
     '''
-    if additive_attention_mask is not None:
-        print('multihead_masked_attention start')
     new_Q = rearrange(
         Q, 'batch seq (nheads headsize) -> batch nheads seq headsize', nheads=num_heads
     )
@@ -87,42 +86,24 @@ def multihead_masked_attention(
         'batches nheads seq_K head_size -> '
         'batches nheads seq_Q seq_K'
     )
-    if additive_attention_mask is not None:
-        print(
-            f'multihead_masked_attention first einsum: eq={einsum_eq}, '
-            f'new_Q.shape={new_Q.shape}, new_K.shape={new_K.shape} '
-            f'num_heads={num_heads}'
-        )
     attention_scores = einsum(einsum_eq, new_Q, new_K)
     attention_scores /= np.sqrt(head_size)
     if additive_attention_mask is not None:
-        print('multihead_masked_attention plus additive_attention_mask')
-    if additive_attention_mask is not None:
         attention_scores += additive_attention_mask
-    if additive_attention_mask is not None:
-        print('multihead_masked_attention softmax')
     attention_probabilities = nn.functional.softmax(
         attention_scores, dim=-1
     )
-    if additive_attention_mask is not None:
-        print('multihead_masked_attention dropout')
     dropped_probabilities = nn.functional.dropout(attention_probabilities, dropout)
-    if additive_attention_mask is not None:
-        print('multihead_masked_attention einsum')
     attention_values = einsum(
         'batches nheads seq_Q seq_K, batches nheads seq_K head_size -> '
         'batches seq_Q nheads head_size', 
         dropped_probabilities, 
         new_V
     )
-    if additive_attention_mask is not None:
-        print('multihead_masked_attention rearrange')
     attention_rearranged = rearrange(
         attention_values, 
         'batches seq_Q nheads head_size -> batches seq_Q (nheads head_size)'
     )
-    if additive_attention_mask is not None:
-        print('multihead_masked_attention end')
     return attention_rearranged
 
 
@@ -144,9 +125,6 @@ class MultiheadAttention(nn.Module):
 
         Return: shape (batch, seq, hidden_size)
         '''
-        if additive_attention_mask is not None:
-            print(f'x.shape={x.shape}, mask.shape={additive_attention_mask.shape}')
-            # print(f'x={x}, mask={additive_attention_mask}')
         QKV = self.W_QKV(x)
         Q = QKV[..., :self.hidden_size]
         K = QKV[..., self.hidden_size:-self.hidden_size]
@@ -188,13 +166,9 @@ class BertBlock(nn.Module):
     def forward(
         self, x: t.Tensor, additive_attention_mask: t.Tensor
     ) -> t.Tensor:
-        print(f'Calling attention')
         att = self.attention(x, additive_attention_mask)
-        print('Calling layer_norm1')
         att_sum = self.layer_norm1(x + att)
-        print('Calling mlp...')
         mlp = self.mlp(att_sum)
-        print('Calling layer_norm2...')
         mlp_sum = self.layer_norm2(att_sum + mlp)
         return mlp_sum
 
@@ -237,22 +211,16 @@ class BertCommon(nn.Module):
         if one_zero_attention_mask is None:
             additive_attention_mask = None
         else:
-            print('Calling make_additive_attention_mask')
             additive_attention_mask = make_additive_attention_mask(
                 one_zero_attention_mask
             )
-        print('Calling token_embedding')
         embedding_sum =  self.token_embedding(x)
-        print('Calling positional_embedding...')
         embedding_sum += self.positional_embedding(pos)
         if token_type_ids is None:
             token_type_ids = t.zeros_like(x)
-        print('Calling segment_embedding')
         embedding_sum += self.segment_embedding(token_type_ids)
-        print('Finished embedding sum')
         x = self.layer_norm(embedding_sum)
         x = self.dropout(x)
-        print('Starting bert blocks...')
         for block in self.bert_blocks:
             x = block(x, additive_attention_mask)
         return x
@@ -299,7 +267,7 @@ class BertClassifier(nn.Module):
         self.stars = nn.Linear(config.hidden_size, 1)
         self.sentiment = nn.Linear(config.hidden_size, 2)
 
-    def forward(self, x: t.Tensor, one_zero_attention_mask: Optional[t.Tensor] = None,) -> Tuple[t.Tensor, t.Tensor]:
+    def forward(self, x: t.Tensor, one_zero_attention_mask: Optional[t.Tensor] = None,) -> Dict[str, t.Tensor]:
         '''
         x: (batch, seq)
 
@@ -308,11 +276,9 @@ class BertClassifier(nn.Module):
         assert isinstance(x, t.Tensor), (
             f'Bad input to BertClassifier.forward: {type(x)} of length {len(x)}'
         )
-        print('Calling BertCommon...')
         x = self.common(x, one_zero_attention_mask=one_zero_attention_mask)
-        print('Taking first position...')
         x = x[:, 0] # First position only
         x = self.dropout(x)
         stars = self.stars(x) * 5 + 5
         sentiment = self.sentiment(x)
-        return sentiment, stars
+        return dict(sentiment=sentiment, stars=stars)
