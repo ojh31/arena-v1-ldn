@@ -1,10 +1,10 @@
-FROM continuumio/miniconda3
+FROM --platform=linux/amd64 continuumio/miniconda3
 
 # Create the environment:
 COPY environment.yml .
 RUN conda env create -f environment.yml
 
-COPY hello.py /app/hello.py
+COPY . /app/
 ENV NREPEATS=7
 
 ENV PATH /opt/conda/envs/myenv/bin:$PATH
