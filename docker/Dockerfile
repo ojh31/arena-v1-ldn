@@ -11,6 +11,8 @@ SHELL ["conda", "run", "-n", "myenv", "/bin/bash", "-c"]
 RUN echo "Make sure flask is installed:"
 RUN python -c "import flask"
 
+COPY hello.py /app/hello.py
 ENV NREPEATS=7
-ENV PATH="/opt/myenv/bin:$PATH"
-ENTRYPOINT ["flask", "--app", "hello", "run"]
+
+ENV PATH /opt/conda/envs/myenv/bin:$PATH
+CMD ["bash", "-c", "source activate myenv && python app/hello.py"]
