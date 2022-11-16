@@ -1,8 +1,8 @@
 from flask import Flask
-# import os
+import os
 
 app = Flask(__name__)
 
 @app.route("/")
 def hello_world():
-    return "<p>Hello, World!</p>" #* os.environ['NREPEATS']
+    return "<p>Hello, World!</p>" * os.environ.get('NREPEATS', 1)

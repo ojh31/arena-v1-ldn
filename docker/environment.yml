@@ -1,4 +1,4 @@
-name: flask
+name: myenv
 channels:
   - conda-forge
 dependencies:
@@ -33,4 +33,4 @@ dependencies:
   - wheel=0.38.4=pyhd8ed1ab_0
   - xz=5.2.6=h166bdaf_0
   - zipp=3.10.0=pyhd8ed1ab_0
-prefix: /home/oskar/ENTER/envs/flask
+prefix: /home/oskar/ENTER/envs/myenv
