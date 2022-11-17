@@ -1,0 +1,8 @@
+# if provisioning multi-gpu node on Vast, run this to get it read to run ddp_oop_one_node_multi_gpu.py
+apt install python3-pip -y && \
+pip3 install torch torchvision && \
+apt install nano
+
+
+
+
