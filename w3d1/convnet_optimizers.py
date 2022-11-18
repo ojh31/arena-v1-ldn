@@ -52,36 +52,49 @@ trainset = datasets.MNIST(root="./data", train=True, transform=transform, downlo
 testset = datasets.MNIST(root="./data", train=False, transform=transform, download=True)
 
 #%%
-def train_convnet(
-    loss_fn: Callable
-) -> list:
+def train_convnet(config=None):
     """
     Defines a ConvNet using our previous code, and trains it on the data in trainloader.
     
     Returns tuple of (loss_list, accuracy_list), where accuracy_list contains the fraction of accurate classifications on the test set, at the end of each epoch.
     """
+    wandb.init(config=config)
+    config = wandb.config
 
-    wandb.init(
-        project='convnet_optimizers',
-        config = {
-            'batch_size': 128,
-            'lr': 0.001,
-            'epochs': 3,
-        }
-    ) 
-    epochs = wandb.config.epochs
-    lr = wandb.config.lr
-    batch_size = wandb.config.batch_size
+    # wandb.init(
+    #     project='convnet_optimizers',
+    #     config = {
+    #         'batch_size': 128,
+    #         'lr': 0.001,
+    #         'epochs': 3,
+    #     }
+    # ) 
+    epochs = config.epochs
+    lr = config.lr
+    batch_size = config.batch_size
+    weight_decay = config.weight_decay
+    optimizer_name = config.optimizer
+    optimizer_class = getattr(t.optim, optimizer_name)
     
     trainloader = DataLoader(
         trainset, batch_size=batch_size, shuffle=True
     )
     testloader = DataLoader(testset, batch_size=batch_size, shuffle=True)
 
-
-
     model = ConvNet().to(device).train()
-    optimizer = t.optim.Adam(model.parameters(), lr=lr)
+    weight_params = [
+        p_val for p_name, p_val in model.named_parameters() 
+        if 'bias' not in p_name
+    ]
+    bias_params = [
+        p_val for p_name, p_val in model.named_parameters() 
+        if 'bias' in p_name
+    ]
+    optimizer = optimizer_class(
+        [{'params': weight_params, 'weight_decay': weight_decay}, 
+        {'params': bias_params, 'weight_decay': 0}], 
+        lr=lr
+    )
     loss_list = []
     accuracy_list = []
     start_time = time.time()
@@ -126,7 +139,25 @@ def train_convnet(
     wandb.save(filename)
 
 #%%
-train_convnet(
-    loss_fn
-)
-#%%
+sweep_configuration = {
+    'method': 'random',
+    'name': 'convnet_sweep',
+    'metric': {
+        'goal': 'minimize', 
+        'name': 'train_loss'
+		},
+    'parameters': {
+        'batch_size': {'values': [128]},
+        'epochs': {'values': [5]},
+        'lr': {'values': [0.001, .01]},
+        # 'lr': {'min': .0001, 'max': .01, 'distribution': 'loguniform'},
+        'optimizer': {'values': ['Adam', 'RMSprop']},
+        'weight_decay': {'values': [0.0, 0.1]},
+     }
+}
+sweep_id = wandb.sweep(sweep=sweep_configuration, project="convnet_optimizers")
+wandb.agent(sweep_id, count=10, function=train_convnet)
+#%% 
+# Weight decay is bad
+# Adam dominates
+# 
