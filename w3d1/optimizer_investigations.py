@@ -71,7 +71,7 @@ class SGD:
                             momentum * self.velocity[g_idx][p_idx] + 
                             grad
                         )
-                        self.params[g_idx]['params'][p_idx] -= (
+                        p -= (
                             lr * self.velocity[g_idx][p_idx]
                         )
         else:
@@ -88,7 +88,7 @@ class SGD:
                         momentum * self.velocity[i] + 
                         grad
                     )
-                    self.params[i] -= self.lr * self.velocity[i]
+                    p -= self.lr * self.velocity[i]
 
 
 utils.test_sgd_param_groups(SGD)
