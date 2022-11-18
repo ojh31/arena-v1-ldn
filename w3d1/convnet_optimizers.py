@@ -43,20 +43,17 @@ transform = transforms.Compose([
 
 # ================================= ConvNet training & testing =================================
 #%%
-epochs = 3
 loss_fn = nn.CrossEntropyLoss()
-batch_size = 128
 
 device = "cuda" if t.cuda.is_available() else "cpu"
 
 trainset = datasets.MNIST(root="./data", train=True, transform=transform, download=True)
-trainloader = DataLoader(trainset, batch_size=batch_size, shuffle=True)
+
 testset = datasets.MNIST(root="./data", train=False, transform=transform, download=True)
-testloader = DataLoader(testset, batch_size=batch_size, shuffle=True)
 
 #%%
 def train_convnet(
-    trainloader: DataLoader, testloader: DataLoader, epochs: int, loss_fn: Callable
+    loss_fn: Callable
 ) -> list:
     """
     Defines a ConvNet using our previous code, and trains it on the data in trainloader.
@@ -64,28 +61,33 @@ def train_convnet(
     Returns tuple of (loss_list, accuracy_list), where accuracy_list contains the fraction of accurate classifications on the test set, at the end of each epoch.
     """
 
-    # wandb.init(
-    #     project='shakespeare',
-    #     config = {
-    #         'batch_size': 64,
-    #         'hidden_size': 512,
-    #         'lr': 0.001,
-    #         'epochs': 1,
-    #         'max_seq_len': 30,
-    #         'dropout': 0.1,
-    #         'num_layers': 6,
-    #         'num_heads': 8,
-    #     }
-    # ) 
+    wandb.init(
+        project='convnet_optimizers',
+        config = {
+            'batch_size': 128,
+            'lr': 0.001,
+            'epochs': 3,
+        }
+    ) 
+    epochs = wandb.config.epochs
+    lr = wandb.config.lr
+    batch_size = wandb.config.batch_size
     
+    trainloader = DataLoader(
+        trainset, batch_size=batch_size, shuffle=True
+    )
+    testloader = DataLoader(testset, batch_size=batch_size, shuffle=True)
+
+
+
     model = ConvNet().to(device).train()
-    optimizer = t.optim.Adam(model.parameters())
+    optimizer = t.optim.Adam(model.parameters(), lr=lr)
     loss_list = []
     accuracy_list = []
     start_time = time.time()
     examples_seen = 0
     
-    for epoch in tqdm_notebook(range(epochs)):
+    for _ in tqdm_notebook(range(epochs)):
         
         for (x, y) in tqdm_notebook(trainloader):
             x = x.to(device)
@@ -99,9 +101,9 @@ def train_convnet(
             
             examples_seen += len(y)
             loss_list.append(loss.item())
-            # wandb.log({
-            #     "train_loss": loss, "elapsed": time.time() - start_time
-            # }, step=examples_seen)
+            wandb.log({
+                "train_loss": loss, "elapsed": time.time() - start_time
+            }, step=examples_seen)
         
         with t.inference_mode():
             accuracy = 0
@@ -115,17 +117,16 @@ def train_convnet(
                 total += y.size(0)
 
             accuracy_list.append(accuracy/total)
-            # wandb.log({"test_accuracy": accuracy/total}, step=examples_seen)
+            wandb.log({"test_accuracy": accuracy/total}, step=examples_seen)
             
-        # print(f"Epoch {epoch+1}/{epochs}, train loss is {loss:.6f}, accuracy is {accuracy}/{total}")
     
-    # filename = f"{wandb.run.dir}/model_state_dict.pt"
-    # print(f"Saving model to: {filename}")
-    # t.save(model.state_dict(), filename)
-    # wandb.save(filename)
+    filename = f"{wandb.run.dir}/model_state_dict.pt"
+    print(f"Saving model to: {filename}")
+    t.save(model.state_dict(), filename)
+    wandb.save(filename)
 
 #%%
 train_convnet(
-    trainloader, testloader, epochs, loss_fn
+    loss_fn
 )
 #%%
