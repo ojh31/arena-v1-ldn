@@ -5,3 +5,5 @@ data/
 */data/*
 *.pt
 .vscode
+*:Zone.Identifier
+*.DS_Store
