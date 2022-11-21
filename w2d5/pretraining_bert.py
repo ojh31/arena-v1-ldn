@@ -18,7 +18,7 @@ import random
 import numpy as np
 
 MAIN = __name__ == "__main__"
-DATA_FOLDER = "./data"
+DATA_FOLDER = "/home/oskar/projects/arena-v1-ldn/w2d5/data"
 DATASET = "2"
 BASE_URL = "https://s3.amazonaws.com/research.metamind.io/wikitext/"
 DATASETS = {"103": "wikitext-103-raw-v1.zip", "2": "wikitext-2-raw-v1.zip"}
@@ -175,6 +175,8 @@ if MAIN:
 #
 #  %%
 from fancy_einsum import einsum
+import importlib
+importlib.reload(utils)
 
 def cross_entropy_selected(
     pred: t.Tensor, target: t.Tensor, was_selected: t.Tensor
@@ -188,15 +190,14 @@ def cross_entropy_selected(
 
     Out: the mean loss per predicted token
     '''
-    batch, seq, vocab_size = pred.shape
-    vocab_index = repeat(t.arange(0, vocab_size), 'v -> b s v', b=batch, s=seq)
-    target_broadcast = repeat(target, 'b s -> b s v', v=vocab_size)
-    selected_broadcast = repeat(was_selected, 'b s -> b s v', v=vocab_size)
-    pred[(vocab_index != target_broadcast) & (selected_broadcast == 0)] = -t.inf
-    pred[(vocab_index == target_broadcast) & (selected_broadcast == 0)] = 0
     pred_flat = rearrange(pred, 'b s v -> (b s) v')
     target_flat = rearrange(target, 'b s -> (b s)')
-    return F.cross_entropy(pred_flat, target_flat)
+    selected_flat = rearrange(was_selected, 'b s -> (b s)')
+
+    return F.cross_entropy(
+        pred_flat[selected_flat == 1], 
+        target_flat[selected_flat == 1]
+    )
 
 if MAIN:
     utils.test_cross_entropy_selected(cross_entropy_selected)
@@ -210,4 +211,141 @@ if MAIN:
     )
     loss = cross_entropy_selected(pred, batch, was_selected).item()
     print(f"Random MLM loss on random tokens - does this make sense? {loss:.2f}")
+# %%
+from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class TransformerConfig:
+    '''Constants used throughout your decoder-only transformer model.'''
+
+    num_layers: int
+    num_heads: int
+    vocab_size: int
+    hidden_size: int
+    max_seq_len: int
+    dropout: float = 0.1
+    layer_norm_epsilon: float = 1e-05
+
+#%%
+hidden_size = 512
+bert_config_tiny = TransformerConfig(
+    num_layers = 8,
+    num_heads = hidden_size // 64,
+    vocab_size = 28996,
+    hidden_size = hidden_size,
+    max_seq_len = 128,
+    dropout = 0.1,
+    layer_norm_epsilon = 1e-12
+)
+
+config_dict = dict(
+    lr=0.0002,
+    epochs=40,
+    batch_size=128,
+    weight_decay=0.01,
+    mask_token_id=tokenizer.mask_token_id,
+    warmup_step_frac=0.01,
+    eps=1e-06,
+    max_grad_norm=None,
+)
+#%%
+train_data, val_data, test_data = t.load("./data/wikitext_tokens_2.pt")
+print("Training data size: ", train_data.shape)
+
+train_loader = DataLoader(
+    TensorDataset(train_data), shuffle=True, 
+    batch_size=config_dict["batch_size"], drop_last=True
+)
+# %%
+import matplotlib.pyplot as plt
+
+def lr_for_step(step: int, max_step: int, max_lr: float, warmup_step_frac: float):
+    '''Return the learning rate for use at this step of training.'''
+    warmup_steps = max_step * warmup_step_frac
+    initial_lr = max_lr * 0.1
+    if step < warmup_steps:
+        return initial_lr + (max_lr - initial_lr) * float(step) / warmup_steps
+    return (
+        max_lr - 
+        (max_lr - initial_lr) * float(step - warmup_steps) / (max_step - warmup_steps)
+    )
+
+
+if MAIN:
+    max_step = int(len(train_loader) * config_dict["epochs"])
+    lrs = [
+        lr_for_step(
+            step, max_step, max_lr=config_dict["lr"], 
+            warmup_step_frac=config_dict["warmup_step_frac"]
+        )
+        for step in range(max_step)
+    ]
+    fig, ax = plt.subplots()
+    fig.suptitle(
+        f'schedule for max_step={max_step}, max_lr={config_dict["lr"]}, '
+        f'wu={config_dict["warmup_step_frac"]}'
+    )
+    ax.plot(lrs)
+    ax.set_ylabel('lr')
+    ax.set_xlabel('step')
+# %%
+from bert_architecture import BertLanguageModel
+def make_optimizer(model: BertLanguageModel, config_dict: dict) -> t.optim.AdamW:
+    '''
+    Loop over model parameters and form two parameter groups:
+
+    - The first group includes the weights of each Linear layer and 
+        uses the weight decay in config_dict
+    - The second has all other parameters and uses weight decay of 0
+    '''
+    weight_decay = config_dict['weight_decay']
+    lr = config_dict['lr']
+    params = dict(model.named_parameters())
+    weight_keys = {
+        p_name for p_name in params.keys()
+        if 'weight' in p_name and (
+            'bert_block' in p_name or 'linear' in p_name
+        )
+    }
+    weight_params = [
+        p_val for p_name, p_val in params.items() 
+        if p_name in weight_keys
+    ]
+    bias_params = [
+        p_val for p_name, p_val in params.items() 
+        if p_name not in weight_keys
+    ]
+    optimizer = t.optim.AdamW(
+        [{'params': weight_params, 'weight_decay': weight_decay}, 
+        {'params': bias_params, 'weight_decay': 0}], 
+        lr=lr
+    )
+    return optimizer
+
+if MAIN:
+    test_config = TransformerConfig(
+        num_layers = 3,
+        num_heads = 1,
+        vocab_size = 28996,
+        hidden_size = 1,
+        max_seq_len = 4,
+        dropout = 0.1,
+        layer_norm_epsilon = 1e-12,
+    )
+
+    optimizer_test_model = BertLanguageModel(test_config)
+    opt = make_optimizer(
+        optimizer_test_model, 
+        dict(weight_decay=0.1, lr=0.0001, eps=1e-06)
+    )
+    expected_num_with_weight_decay = test_config.num_layers * 6 + 1
+    wd_group = opt.param_groups[0]
+    actual = len(wd_group["params"])
+    assert (
+        actual == expected_num_with_weight_decay
+    ), f"Expected 6 linear weights per layer (4 attn, 2 MLP) plus the final lm_linear weight to have weight decay, got {actual}"
+    all_params = set()
+    for group in opt.param_groups:
+        all_params.update(group["params"])
+    assert all_params == set(optimizer_test_model.parameters()), "Not all parameters were passed to optimizer!"
 # %%
