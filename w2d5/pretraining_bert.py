@@ -63,7 +63,9 @@ def tokenize_1d(tokenizer, lines: list[str], max_seq: int) -> t.Tensor:
 
     Return (batch, seq) and an integer dtype.
     '''
-    batch_encoding = tokenizer(lines, truncation=False)
+    batch_encoding = tokenizer(
+        lines, truncation=False, padding=False, add_special_tokens=False
+    )
     list_of_tokens = batch_encoding.input_ids
     large_1d_tensor = t.tensor([
         token for tokens in list_of_tokens for token in tokens
@@ -145,4 +147,67 @@ def random_mask(
 
 if MAIN:
     utils.test_random_mask(random_mask, input_size=10000, max_seq=max_seq)
+# %%
+if MAIN:
+    # OSKAR CODE
+    train_flattened = train_data.flatten()
+    n_train = len(train_flattened)
+    token_counts = t.bincount(train_flattened)
+    token_counts = token_counts[token_counts != 0]
+    token_percents = token_counts / n_train
+    e_log_p = -(t.log(token_percents) * token_percents).sum()
+    print(e_log_p)
+    # 7.28
+# %%
+if MAIN:
+    # CALLUM CODE
+    # Find the word frequencies
+    word_frequencies = t.bincount(train_data.flatten())
+    # Drop the words with occurrence zero (because these contribute zero to cross entropy)
+    word_frequencies = word_frequencies[word_frequencies > 0]
+    # Get probabilities
+    word_probabilities = word_frequencies / word_frequencies.sum()
+    # Calculate the cross entropy
+    cross_entropy = (- word_probabilities * word_probabilities.log()).sum()
+    print(cross_entropy)
+    # ==> 7.3446
+    # OSKAR GETS 7.28
+#
+#  %%
+from fancy_einsum import einsum
+
+def cross_entropy_selected(
+    pred: t.Tensor, target: t.Tensor, was_selected: t.Tensor
+) -> t.Tensor:
+    '''
+    pred: (batch, seq, vocab_size) - predictions from the model
+    target: (batch, seq, ) - the original (not masked) input ids
+    was_selected: (batch, seq) - 
+        1 if the token at this index will contribute to the MLM loss, 
+        0 otherwise
+
+    Out: the mean loss per predicted token
+    '''
+    batch, seq, vocab_size = pred.shape
+    vocab_index = repeat(t.arange(0, vocab_size), 'v -> b s v', b=batch, s=seq)
+    target_broadcast = repeat(target, 'b s -> b s v', v=vocab_size)
+    selected_broadcast = repeat(was_selected, 'b s -> b s v', v=vocab_size)
+    pred[(vocab_index != target_broadcast) & (selected_broadcast == 0)] = -t.inf
+    pred[(vocab_index == target_broadcast) & (selected_broadcast == 0)] = 0
+    pred_flat = rearrange(pred, 'b s v -> (b s) v')
+    target_flat = rearrange(target, 'b s -> (b s)')
+    return F.cross_entropy(pred_flat, target_flat)
+
+if MAIN:
+    utils.test_cross_entropy_selected(cross_entropy_selected)
+
+    batch_size = 8
+    seq_length = 512
+    batch = t.randint(0, tokenizer.vocab_size, (batch_size, seq_length))
+    pred = t.rand((batch_size, seq_length, tokenizer.vocab_size))
+    masked, was_selected = random_mask(
+        batch, tokenizer.mask_token_id, tokenizer.vocab_size
+    )
+    loss = cross_entropy_selected(pred, batch, was_selected).item()
+    print(f"Random MLM loss on random tokens - does this make sense? {loss:.2f}")
 # %%
