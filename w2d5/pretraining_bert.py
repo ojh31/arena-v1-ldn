@@ -56,7 +56,7 @@ def decompress(*splits: str) -> str:
 
 train_text, val_text, test_text = decompress("train", "valid", "test")
 # %%
-random.sample(train_text, 5)
+# random.sample(train_text, 5)
 # %%
 def tokenize_1d(tokenizer, lines: list[str], max_seq: int) -> t.Tensor:
     '''Tokenize text and rearrange into chunks of the maximum length.
@@ -115,7 +115,7 @@ def random_mask(
     # Splitting into unsel_size, mask_size, rand_size, unch_size
     # Pick random split
     rand_index = rearrange(
-        t.randperm(batch * seq), 
+        t.randperm(batch * seq, device=input_ids.device), 
         '(b s) -> b s', 
         s=seq
     )
@@ -131,7 +131,7 @@ def random_mask(
 
     # Construct was_selected
     was_selected = t.zeros_like(input_ids)
-    was_selected[sel_mask] = 1
+    was_selected[sel_mask] = t.ones_like(was_selected[sel_mask])
     # Construct model_input
     model_input = t.where(
         mask_mask,
@@ -348,4 +348,62 @@ if MAIN:
     for group in opt.param_groups:
         all_params.update(group["params"])
     assert all_params == set(optimizer_test_model.parameters()), "Not all parameters were passed to optimizer!"
+# %%
+import wandb
+from tqdm.notebook import tqdm
+import time
+device = 'cpu'
+
+def bert_mlm_pretrain(
+    model: BertLanguageModel, config_dict: dict, 
+    train_loader: DataLoader
+) -> None:
+    '''Train using masked language modelling.'''
+    # wandb.init(config=config_dict)
+    optimizer = make_optimizer(model, config_dict)
+    examples_seen = 0
+    step = 0
+    start_time = time.time()
+    epochs = config_dict['epochs']
+    mask_token_id = config_dict['mask_token_id']
+    max_lr = config_dict['lr']
+    warmup_step_frac = config_dict['warmup_step_frac']
+    clip_grad = 1.0
+    max_step = len(train_loader) * epochs
+    for _ in range(epochs):
+        
+        for y, in tqdm(train_loader):
+            lr = lr_for_step(
+                step, max_step, max_lr=max_lr, 
+                warmup_step_frac=warmup_step_frac
+            )
+            for g in optimizer.param_groups:
+                g['lr'] = lr
+            y = y.to(device)
+            x, selected = random_mask(y, mask_token_id, tokenizer.vocab_size)
+            
+            optimizer.zero_grad()
+            y_hat = model(x)
+            loss = cross_entropy_selected(y_hat, y, selected)
+            loss.backward()
+            t.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
+            optimizer.step()
+            
+            examples_seen += len(y)
+            step += 1
+            # wandb.log({
+            #     "train_loss": loss, "elapsed": time.time() - start_time
+            # }, step=examples_seen)
+    
+    # filename = f"{wandb.run.dir}/model_state_dict.pt"
+    # print(f"Saving model to: {filename}")
+    # t.save(model.state_dict(), filename)
+    # wandb.save(filename)
+
+
+if MAIN:
+    model = BertLanguageModel(bert_config_tiny)
+    num_params = sum((p.nelement() for p in model.parameters()))
+    print("Number of model parameters: ", num_params)
+    bert_mlm_pretrain(model, config_dict, train_loader)
 # %%

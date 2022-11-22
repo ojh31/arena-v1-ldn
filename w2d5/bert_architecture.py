@@ -214,7 +214,7 @@ class BertCommon(nn.Module):
             additive_attention_mask = make_additive_attention_mask(
                 one_zero_attention_mask
             )
-        embedding_sum =  self.token_embedding(x)
+        embedding_sum = self.token_embedding(x)
         embedding_sum += self.positional_embedding(pos)
         if token_type_ids is None:
             token_type_ids = t.zeros_like(x)
