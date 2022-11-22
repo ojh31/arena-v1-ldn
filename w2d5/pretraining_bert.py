@@ -353,7 +353,7 @@ if MAIN:
     assert all_params == set(optimizer_test_model.parameters()), "Not all parameters were passed to optimizer!"
 # %%
 import wandb
-from tqdm.notebook import tqdm_notebook
+from tqdm import tqdm
 import time
 device = 'cuda'
 
@@ -375,7 +375,7 @@ def bert_mlm_pretrain(
     max_step = len(train_loader) * epochs
     for _ in range(epochs):
         
-        for y, in tqdm_notebook(train_loader):
+        for y, in tqdm(train_loader):
             lr = lr_for_step(
                 step, max_step, max_lr=max_lr, 
                 warmup_step_frac=warmup_step_frac
@@ -412,3 +412,9 @@ if MAIN:
     print("Number of model parameters: ", num_params)
     bert_mlm_pretrain(model, config_dict, train_loader)
 # %%
+if MAIN:
+    model = bert_architecture.BertLanguageModel(bert_config_tiny)
+    model.load_state_dict(t.load(config_dict["filename"]))
+    your_text = "The Answer to the Ultimate Question of Life, The Universe, and Everything is [MASK]."
+    predictions = utils.predict(model, tokenizer, your_text)
+    print("Model predicted: \n", "\n".join(map(str, predictions)))
