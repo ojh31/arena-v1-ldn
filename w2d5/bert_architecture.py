@@ -25,6 +25,7 @@ def make_additive_attention_mask(
         shape (batch, nheads=1, seqQ=1, seqK)
         Contains 0 if attention is allowed, big_negative_number if not.
     '''
+    device = one_zero_attention_mask.device
     assert isinstance(one_zero_attention_mask, t.Tensor), (
         f'one_zero_attention_mask={one_zero_attention_mask}'
     )
@@ -37,7 +38,7 @@ def make_additive_attention_mask(
         one_zero_attention_mask == 0, 
         big_negative_number,
         0,
-    )
+    ).to(device)
     reshaped = repeat(filled, 'b s -> b n_heads seq_q s', n_heads=1, seq_q=1)
     return reshaped
 
@@ -205,7 +206,7 @@ class BertCommon(nn.Module):
         used in the attention blocks.
         token_type_ids: (batch, seq) - only used for NSP, passed to token type embedding.
         '''
-        batch, seq = x.shape
+        _, seq = x.shape
         assert isinstance(x, t.Tensor)
         pos = t.arange(seq, device=x.device)
         if one_zero_attention_mask is None:

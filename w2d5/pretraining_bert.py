@@ -16,9 +16,10 @@ import requests
 import utils
 import random
 import numpy as np
+from typing import List, Tuple
 
 MAIN = __name__ == "__main__"
-DATA_FOLDER = "/home/oskar/projects/arena-v1-ldn/w2d5/data"
+DATA_FOLDER = "/home/ubuntu/arena-v1-ldn/w2d5/data"
 DATASET = "2"
 BASE_URL = "https://s3.amazonaws.com/research.metamind.io/wikitext/"
 DATASETS = {"103": "wikitext-103-raw-v1.zip", "2": "wikitext-2-raw-v1.zip"}
@@ -58,7 +59,7 @@ train_text, val_text, test_text = decompress("train", "valid", "test")
 # %%
 # random.sample(train_text, 5)
 # %%
-def tokenize_1d(tokenizer, lines: list[str], max_seq: int) -> t.Tensor:
+def tokenize_1d(tokenizer, lines: List[str], max_seq: int) -> t.Tensor:
     '''Tokenize text and rearrange into chunks of the maximum length.
 
     Return (batch, seq) and an integer dtype.
@@ -90,7 +91,7 @@ if MAIN:
 def random_mask(
     input_ids: t.Tensor, mask_token_id: int, vocab_size: int, 
     select_frac=0.15, mask_frac=0.8, random_frac=0.1
-) -> tuple[t.Tensor, t.Tensor]:
+) -> Tuple[t.Tensor, t.Tensor]:
     '''
     Given a batch of tokens, return a copy with tokens replaced according to 
     Section 3.1 of the paper.
@@ -144,7 +145,7 @@ def random_mask(
     )
     return model_input, was_selected
 
-
+#%%
 if MAIN:
     utils.test_random_mask(random_mask, input_size=10000, max_seq=max_seq)
 # %%
@@ -174,7 +175,6 @@ if MAIN:
     # OSKAR GETS 7.28
 #
 #  %%
-from fancy_einsum import einsum
 import importlib
 importlib.reload(utils)
 
@@ -289,8 +289,11 @@ if MAIN:
     ax.set_ylabel('lr')
     ax.set_xlabel('step')
 # %%
-from bert_architecture import BertLanguageModel
-def make_optimizer(model: BertLanguageModel, config_dict: dict) -> t.optim.AdamW:
+import bert_architecture
+importlib.reload(bert_architecture)
+def make_optimizer(
+    model: bert_architecture.BertLanguageModel, config_dict: dict
+) -> t.optim.AdamW:
     '''
     Loop over model parameters and form two parameter groups:
 
@@ -333,7 +336,7 @@ if MAIN:
         layer_norm_epsilon = 1e-12,
     )
 
-    optimizer_test_model = BertLanguageModel(test_config)
+    optimizer_test_model = bert_architecture.BertLanguageModel(test_config)
     opt = make_optimizer(
         optimizer_test_model, 
         dict(weight_decay=0.1, lr=0.0001, eps=1e-06)
@@ -350,16 +353,16 @@ if MAIN:
     assert all_params == set(optimizer_test_model.parameters()), "Not all parameters were passed to optimizer!"
 # %%
 import wandb
-from tqdm.notebook import tqdm
+from tqdm.notebook import tqdm_notebook
 import time
-device = 'cpu'
+device = 'cuda'
 
 def bert_mlm_pretrain(
-    model: BertLanguageModel, config_dict: dict, 
+    model: bert_architecture.BertLanguageModel, config_dict: dict, 
     train_loader: DataLoader
 ) -> None:
     '''Train using masked language modelling.'''
-    # wandb.init(config=config_dict)
+    wandb.init(config=config_dict)
     optimizer = make_optimizer(model, config_dict)
     examples_seen = 0
     step = 0
@@ -372,7 +375,7 @@ def bert_mlm_pretrain(
     max_step = len(train_loader) * epochs
     for _ in range(epochs):
         
-        for y, in tqdm(train_loader):
+        for y, in tqdm_notebook(train_loader):
             lr = lr_for_step(
                 step, max_step, max_lr=max_lr, 
                 warmup_step_frac=warmup_step_frac
@@ -381,6 +384,8 @@ def bert_mlm_pretrain(
                 g['lr'] = lr
             y = y.to(device)
             x, selected = random_mask(y, mask_token_id, tokenizer.vocab_size)
+            x = x.to(device)
+            selected = selected.to(device)
             
             optimizer.zero_grad()
             y_hat = model(x)
@@ -391,18 +396,18 @@ def bert_mlm_pretrain(
             
             examples_seen += len(y)
             step += 1
-            # wandb.log({
-            #     "train_loss": loss, "elapsed": time.time() - start_time
-            # }, step=examples_seen)
+            wandb.log({
+                "train_loss": loss, "elapsed": time.time() - start_time
+            }, step=examples_seen)
     
-    # filename = f"{wandb.run.dir}/model_state_dict.pt"
-    # print(f"Saving model to: {filename}")
-    # t.save(model.state_dict(), filename)
-    # wandb.save(filename)
+    filename = f"{wandb.run.dir}/model_state_dict.pt"
+    print(f"Saving model to: {filename}")
+    t.save(model.state_dict(), filename)
+    wandb.save(filename)
 
 
 if MAIN:
-    model = BertLanguageModel(bert_config_tiny)
+    model = bert_architecture.BertLanguageModel(bert_config_tiny).to(device).train()
     num_params = sum((p.nelement() for p in model.parameters()))
     print("Number of model parameters: ", num_params)
     bert_mlm_pretrain(model, config_dict, train_loader)
