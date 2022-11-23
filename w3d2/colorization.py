@@ -32,13 +32,12 @@ grid_size = 10
 net = Net()
 optimizer = optim.SGD(net.parameters(), lr=0.001)
 distinguish_points = [(0,0), (7, 7)]
-epochs = 100
+epochs = 1_000
 #%%
 pd.DataFrame(net.weights.detach().numpy()).style.background_gradient(cmap='Reds').format('{:.02f}')
 #%%
 heatmaps = []
 for epoch in range(epochs):
-    print(net.weights.detach()[0, 0])
     heatmaps.append(net.weights.detach().clone().numpy())
     # weight_df = pd.DataFrame(
     #     weight_matrix.detach()
@@ -58,12 +57,9 @@ pd.DataFrame(heatmaps[-1]).style.background_gradient(cmap='Reds')
 # epoch_df = pd.concat(heatmaps, ignore_index=True)
 # %%
 frames = [
-    go.Frame(data=go.Heatmap(z=hm), name=f'frame{i+1}') for i, hm in enumerate(heatmaps)
+    go.Frame(data=go.Heatmap(z=hm, zmin=0, zmax=1), name=f'frame{i+1}') 
+    for i, hm in enumerate(heatmaps)
 ]
-fig = go.Figure(
-    data=go.Heatmap(z=heatmaps[0]),
-    frames=frames
-)
 sliders = [dict(
     steps= [
         dict(
@@ -72,27 +68,54 @@ sliders = [dict(
                 [f'frame{k+1}'],
                 dict(
                     mode= 'immediate',
-                    frame= dict( duration=600, redraw= True ),
-                    transition=dict( duration= 200)
+                    frame= dict( duration=1, redraw= True ),
+                    transition=dict( duration= 1)
                 )
             ],
             label='Epoch : {}'.format(k)
         ) 
         for k in range(0, len(frames))
     ], 
-    transition= dict(duration= 100),
+    transition= dict(duration= 1),
     x=0,
     y=0,
     currentvalue=dict(font=dict(size=12), visible=True, xanchor= 'center'),
     len=1.0
 )]
-menus = [
-    dict(type="buttons", visible=True,
-    buttons=[dict(label="Play", method="animate", args=[None])]
+updatemenus = [
+    dict(
+        type="buttons", 
+        visible=True,
+        buttons=[
+            {
+                "args": [
+                    None, 
+                    {
+                        "frame": {"duration": 1}, 
+                        'transition': {'duration': 1}, 
+                        'mode': 'immediate'
+                    }
+                ],
+                "label": "Play",
+                "method": "animate",
+            },
+            {
+                "args": [
+                    [None], 
+                    {'mode': 'immediate'}
+                ],
+                "label": "Pause",
+                "method": "animate",
+            }
+        ]
 )]
-fig.update_layout(
-    updatemenus=menus,
-    sliders=sliders
+fig = go.Figure(
+    data=frames[0].data,
+    frames=frames,
+    layout=dict(
+        updatemenus=updatemenus,
+        sliders=sliders,
+    )
 )
 fig.show()
 # %%
