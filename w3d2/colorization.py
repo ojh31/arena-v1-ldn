@@ -3,7 +3,6 @@ import torch as t
 import torch.nn as nn
 from torch import optim as optim
 from typing import Tuple, Iterable
-import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 # %%
@@ -18,7 +17,7 @@ def loss_fn(weights: t.Tensor, distinguish: Iterable[Tuple[int]]):
 #%%
 class Net(nn.Module):
 
-    def __init__(self) -> None:
+    def __init__(self, grid_size) -> None:
         super().__init__()
         self.weights = nn.Parameter(
             t.zeros((grid_size, grid_size))
@@ -28,33 +27,19 @@ class Net(nn.Module):
         return self.weights
 
 #%%
-grid_size = 10
-net = Net()
-optimizer = optim.SGD(net.parameters(), lr=0.001)
-distinguish_points = [(0,0), (7, 7)]
+grid_size = 100
+net = Net(grid_size=grid_size)
+optimizer = optim.SGD(net.parameters(), lr=0.1)
+distinguish_points = [(0,0), (70, 70)]
 epochs = 1_000
-#%%
-pd.DataFrame(net.weights.detach().numpy()).style.background_gradient(cmap='Reds').format('{:.02f}')
 #%%
 heatmaps = []
 for epoch in range(epochs):
     heatmaps.append(net.weights.detach().clone().numpy())
-    # weight_df = pd.DataFrame(
-    #     weight_matrix.detach()
-    # ).unstack().reset_index()
-    # weight_df.columns = ['x', 'y', 'z']
-    # weight_df['t'] = epoch
-    # heatmaps.append(weight_df)
     loss = loss_fn(net(), distinguish_points)
     loss.backward()
     optimizer.step()
 
-#%%
-pd.DataFrame(heatmaps[0]).style.background_gradient(cmap='Reds')
-#%%
-pd.DataFrame(heatmaps[-1]).style.background_gradient(cmap='Reds')
-# %%
-# epoch_df = pd.concat(heatmaps, ignore_index=True)
 # %%
 frames = [
     go.Frame(data=go.Heatmap(z=hm, zmin=0, zmax=1), name=f'frame{i+1}') 
@@ -118,4 +103,6 @@ fig = go.Figure(
     )
 )
 fig.show()
+# %%
+fig.write_html("./colorization.html")
 # %%
