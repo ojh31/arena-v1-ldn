@@ -10,6 +10,8 @@ from tqdm.notebook import tqdm_notebook
 
 MAIN = __name__ == "__main__"
 max_episode_steps = 1000
+stationary = True
+num_arms = 10
 IS_CI = os.getenv("IS_CI")
 N_RUNS = 200 if not IS_CI else 5
 # %%
@@ -83,7 +85,7 @@ gym.envs.registration.register(
     max_episode_steps=max_episode_steps,
     nondeterministic=True,
     reward_threshold=1.0,
-    kwargs={"num_arms": 10, "stationary": True},
+    kwargs={"num_arms": num_arms, "stationary": stationary},
 )
 if MAIN:
     env = gym.make("ArmedBanditTestbed-v0")
@@ -190,8 +192,6 @@ class RewardAveraging(Agent):
         return self.means.argmax()
 
 if MAIN:
-    num_arms = 10
-    stationary = True
     env = gym.make("ArmedBanditTestbed-v0", num_arms=num_arms, stationary=stationary)
     regular_reward_averaging = RewardAveraging(num_arms, 0, epsilon=0.1, optimism=0)
     (all_rewards, all_corrects) = test_agent(env, regular_reward_averaging, n_runs=N_RUNS)
@@ -309,8 +309,6 @@ class GradientBandit(Agent):
         return self.rng.choice(np.arange(self.num_arms), p=self.probs)
 
 if MAIN:
-    num_arms = 10
-    stationary = False
     env = gym.make("ArmedBanditTestbed-v0", num_arms=num_arms, stationary=stationary)
     grad_bandit = GradientBandit(num_arms, 0, alpha=0.1)
     (all_rewards, all_corrects) = test_agent(env, grad_bandit, n_runs=20)
